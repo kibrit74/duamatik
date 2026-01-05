@@ -1,0 +1,8 @@
+{
+  "name": "Dijital Tesbih & Dua Asistanı",
+  "description": "Yapay zeka destekli, modern arayüzlü tesbih ve dua takip uygulaması. Resimden metin okuma ve akıllı arama özellikleri içerir.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}
