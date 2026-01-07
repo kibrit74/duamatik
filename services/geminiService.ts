@@ -1,9 +1,66 @@
 
 import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { SearchResult, GroundingChunk, SpiritualPlan } from "../types";
+import { logUsageStat, getAppSetting } from "./supabase";
+import { logger } from "../utils/logger";
 
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+// Fallback API anahtarı (.env.local'dan)
+const fallbackApiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
+
+// Dinamik API anahtarı yönetimi
+let cachedApiKey: string | null = null;
+let ai: GoogleGenAI | null = null;
+
+// API anahtarını al (önce Supabase, sonra .env.local)
+async function getApiKey(): Promise<string> {
+  if (cachedApiKey) {
+    logger.log('🔑 Using cached API key, length:', cachedApiKey.length);
+    return cachedApiKey;
+  }
+
+  try {
+    logger.log('🔍 Fetching API key from Supabase...');
+    let dbKey = await getAppSetting('gemini_api_key');
+    logger.log('📦 Supabase returned key:', dbKey ? `length=${dbKey.length}, starts=${dbKey.substring(0, 15)}...` : 'NULL/EMPTY');
+
+    // Bozuk anahtar tespiti - 50 karakterden uzunsa muhtemelen iki kere yapıştırılmış
+    if (dbKey && dbKey.length > 50) {
+      logger.warn('⚠️ API key appears corrupted (too long). Attempting to fix...');
+      // Gemini API keys are typically 39 chars and start with "AIzaSy"
+      if (dbKey.startsWith('AIzaSy')) {
+        dbKey = dbKey.substring(0, 39); // İlk 39 karakteri al
+        logger.log('🔧 Fixed key length:', dbKey.length);
+      }
+    }
+
+    if (dbKey && dbKey.length > 10 && dbKey.length < 50) {
+      cachedApiKey = dbKey;
+      return dbKey;
+    }
+  } catch (e) {
+    logger.warn('❌ Supabase API key okunamadı, fallback kullanılıyor:', e);
+  }
+
+  logger.log('⚠️ Using fallback API key, length:', fallbackApiKey?.length || 0);
+  cachedApiKey = fallbackApiKey;
+  return fallbackApiKey;
+}
+
+// GoogleGenAI instance'ı al
+async function getAI(): Promise<GoogleGenAI> {
+  if (ai) return ai;
+  const apiKey = await getApiKey();
+  if (!apiKey) throw new Error("API Anahtarı bulunamadı. Admin panelinden veya .env.local'dan tanımlayın.");
+  ai = new GoogleGenAI({ apiKey });
+  return ai;
+}
+
+// API anahtarı cache'ini temizle (admin panelden değiştirildiğinde çağrılabilir)
+export function clearApiKeyCache() {
+  cachedApiKey = null;
+  ai = null;
+}
+
 
 /**
  * Helper function to robustly extract JSON from a potential markdown string
@@ -198,8 +255,8 @@ const getFallbackPlan = (mood: string): SpiritualPlan => {
 
   // Generic Fallback
   return {
-    title: "Sükunet Programı",
-    description: "Senin için genel bir ferahlama ve manevi denge programı hazırladım.",
+    title: "Manevi Reçete",
+    description: "Sana özel hazırladığım bu program ile kalbini ferahlat.",
     days: [
       {
         day: 1,
@@ -226,12 +283,145 @@ const getFallbackPlan = (mood: string): SpiritualPlan => {
   };
 };
 
+
+// ==========================================
+// CHAT SESSION & MANEVİ KOÇ
+// ==========================================
+
+export interface ChatMessage {
+  role: 'user' | 'model';
+  parts: { text: string }[];
+}
+
+export interface ChatResponse {
+  text: string;
+  plan?: SpiritualPlan; // Eğer cevap içinde plan varsa
+}
+
+const SYSTEM_INSTRUCTION = `
+Sen bir Manevi Rehbersin (Manevi Asistan).
+Amacın: İnsanları teselli etmek, huzur vermek, İslami kaynaklardan (Ayet, Hadis, Büyüklerin Sözleri) örnekler vererek onları rahatlatmak.
+
+Kurallar:
+1. İslami literatüre sadık kal ama dilin günümüz Türkçesi, samimi, şefkatli ve akıcı olsun.
+2. Asla yargılama, her zaman kucaklayıcı ol. Sadece "Allah'ın rahmeti geniştir" mesajını ver.
+3. Siyaset, fıkhi tartışmalar (helal/haram fetvası verme) veya tartışmalı konulardan uzak dur. Fetva sorulursa "Bu konuda ehil hocalara veya Diyanet'e danışman daha doğru olur" de.
+4. Kullanıcı bir derdini paylaşırsa, ona "Seni çok iyi anlıyorum kardeşim..." gibi empatik cümlelerle başla.
+5. Uygun yerlerde emoji kullan (🌹, 🤲, ✨ gibi) ama abartma.
+6. Eğer kullanıcı senden "program", "reçete", "plan" veya "ne yapmalıyım" gibi yapılandırılmış bir tavsiye isterse, cevabının sonuna (veya içine) AŞAĞIDAKİ JSON FORMATINDA bir plan ekle. JSON bloğu \`\`\`json ve \`\`\` arasında olsun.
+
+PLAN JSON FORMATI:
+{
+  "title": "Program Başlığı",
+  "description": "Açıklama",
+  "days": [ { "day": 1, "focus": "Odak", "morning": "...", "evening": "...", "dhikr": "..." }, ... ]
+}
+`;
+
+// Helper class to mimic the old ChatSession behavior with the new SDK
+class SimpleChatSession {
+  private history: ChatMessage[];
+  private systemInstruction: string;
+  private modelName: string;
+
+  constructor(history: ChatMessage[], systemInstruction: string, modelName: string) {
+    this.history = history;
+    this.systemInstruction = systemInstruction;
+    this.modelName = modelName;
+  }
+
+  async sendMessage(message: string) {
+    // Add user message
+    this.history.push({ role: 'user', parts: [{ text: message }] });
+
+    try {
+      const aiInstance = await getAI();
+      const response = await aiInstance.models.generateContent({
+        model: this.modelName,
+        contents: this.history,
+        config: {
+          systemInstruction: this.systemInstruction,
+        }
+      });
+
+      const text = response.text || "";
+
+      // Add model response
+      this.history.push({ role: 'model', parts: [{ text }] });
+
+      // Return in a format compatible with the existing `sendChatMessage` function
+      return {
+        response: {
+          text: () => text
+        }
+      };
+    } catch (error) {
+      logger.error("Chat Error:", error);
+      throw error;
+    }
+  }
+}
+
+export async function createChatHistory(history: ChatMessage[] = []): Promise<any> {
+  // Return our custom wrapper that matches the expected interface
+  return new SimpleChatSession(history, SYSTEM_INSTRUCTION, "gemini-2.0-flash");
+}
+
+export async function sendChatMessage(chat: any, message: string): Promise<ChatResponse> {
+  try {
+    const result = await chat.sendMessage(message);
+    const text = result.response.text();
+
+    let responseText = text;
+    let planData: SpiritualPlan | undefined;
+
+    // Check for JSON plan in response
+    const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonMatch && jsonMatch[1]) {
+      try {
+        planData = JSON.parse(jsonMatch[1]);
+        // Remove JSON from text to show clean message
+        responseText = text.replace(/```json[\s\S]*?```/, '').trim();
+      } catch (e) {
+        logger.warn("JSON Parse Error in Chat:", e);
+      }
+    } else {
+      // Fallback
+      try {
+        const extracted = extractJSON(text);
+        if (extracted && extracted.days) {
+          planData = extracted;
+        }
+      } catch (e) { logger.error('Manual parsing failed', e); }
+    }
+
+    return {
+      text: responseText || "Seni dinliyorum...",
+      plan: planData
+    };
+
+  } catch (error: any) {
+    logger.error("Chat Error:", error);
+
+    // Kota aşımı veya yoğunluk kontrolü (429 / Resource Exhausted)
+    if (error.message?.includes('429') || error.message?.includes('quota') || error.message?.includes('RESOURCE_EXHAUSTED')) {
+      return {
+        text: "⚠️ Üzgünüm, şu an çok yoğunum veya günlük işlem kotam doldu. Lütfen bir süre sonra tekrar dene. (Hata: 429)"
+      };
+    }
+
+    return {
+      text: "Şu an bağlantımda bir zayıflık var ama kalben yanındayım. Lütfen biraz sonra tekrar yaz. 🌹"
+    };
+  }
+}
+
 export const extractTextFromImage = async (base64Image: string, mimeType: string = 'image/jpeg'): Promise<string> => {
-  if (!apiKey) throw new Error("API Anahtarı (API Key) tanımlanmamış. Lütfen ayarları kontrol edin.");
+  const aiInstance = await getAI();
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+    const response = await aiInstance.models.generateContent({
+      model: 'gemini-2.0-flash',
       contents: {
         parts: [
           {
@@ -251,19 +441,22 @@ export const extractTextFromImage = async (base64Image: string, mimeType: string
       throw new Error("Model boş yanıt döndürdü.");
     }
 
+    // Başarılı OCR işlemini kaydet
+    logUsageStat('ocr').catch(logger.warn);
+
     return response.text;
   } catch (error) {
-    console.error("OCR Error:", error);
+    logger.error("OCR Error:", error);
     throw new Error("Resim okunurken bir hata oluştu. Lütfen tekrar deneyin.");
   }
 };
 
 export const searchPrayer = async (query: string): Promise<SearchResult> => {
-  if (!apiKey) throw new Error("API Anahtarı eksik. Uygulama ayarlarını kontrol edin.");
+  const aiInstance = await getAI();
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+    const response = await aiInstance.models.generateContent({
+      model: 'gemini-2.0-flash',
       contents: `Kullanıcı şu konuda bir dua arıyor: "${query}".
       
       Lütfen bu duruma uygun en bilinen ve sahih duayı bul.
@@ -301,63 +494,114 @@ export const searchPrayer = async (query: string): Promise<SearchResult> => {
 
     return { text, sources: uniqueSources };
   } catch (error: any) {
-    console.error("Search Error Details:", error);
+    logger.error("Search Error Details:", error);
     // Return a more user-friendly error message
     throw new Error(error.message || "Dua araması sırasında bağlantı hatası oluştu.");
   }
 };
 
 export const generatePrayerAudio = async (text: string): Promise<string> => {
-  if (!apiKey) throw new Error("API Anahtarı eksik.");
+  const aiInstance = await getAI();
 
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: text }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            // 'Fenrir' is a male voice. Other options: 'Puck' (Male), 'Kore' (Female), 'Charon' (Male)
-            prebuiltVoiceConfig: { voiceName: 'Fenrir' },
+  // Metin temizleme ve validasyon
+  let cleanText = text
+    .trim()
+    .replace(/[\u200B-\u200D\uFEFF]/g, '') // Zero-width karakterleri temizle
+    .replace(/\s+/g, ' ') // Çoklu boşlukları tekle
+    .replace(/[^\w\sğüşıöçĞÜŞİÖÇ.,!?;:'"()-]/gi, '') // Özel karakterleri temizle
+    .slice(0, 800); // Daha kısa limit
+
+  if (!cleanText || cleanText.length < 10) {
+    throw new Error("Ses oluşturmak için yeterli metin yok.");
+  }
+
+  // Retry mekanizması
+  const maxRetries = 2;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await aiInstance.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: [{ parts: [{ text: cleanText }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: 'Kore' }, // Farklı ses dene
+            },
           },
         },
-      },
-    });
+      });
 
-    let base64Audio: string | undefined = undefined;
+      // finishReason kontrolü
+      if (response.candidates && response.candidates.length > 0) {
+        const candidate = response.candidates[0];
+        const finishReason = candidate.finishReason;
 
-    // Robustly find the audio part in the response
-    if (response.candidates && response.candidates.length > 0) {
-      const candidate = response.candidates[0];
-      if (candidate.content && candidate.content.parts) {
-        for (const part of candidate.content.parts) {
-          if (part.inlineData && part.inlineData.data) {
-            base64Audio = part.inlineData.data;
-            break;
+        // Başarısız finish reason'ları kontrol et
+        if (finishReason === 'OTHER' || finishReason === 'SAFETY' || finishReason === 'RECITATION') {
+          logger.warn(`TTS finishReason: ${finishReason}, attempt ${attempt + 1}`);
+
+          if (attempt < maxRetries) {
+            // Metni kısaltarak tekrar dene
+            cleanText = cleanText.slice(0, Math.floor(cleanText.length * 0.6));
+            await new Promise(r => setTimeout(r, 300));
+            continue;
+          }
+
+          // Kullanıcıya daha açıklayıcı hata
+          throw new Error("Gemini TTS API şu anda yanıt vermiyor (Preview). Tarayıcı sesini kullanabilirsiniz.");
+        }
+
+        // Audio verisini bul
+        if (candidate.content && candidate.content.parts) {
+          for (const part of candidate.content.parts) {
+            if (part.inlineData && part.inlineData.data) {
+              // Başarılı TTS işlemini kaydet
+              logUsageStat('tts').catch(logger.warn);
+              return part.inlineData.data;
+            }
           }
         }
       }
-    }
 
-    if (!base64Audio) {
-      console.error("Gemini TTS response missing audio data. Response:", JSON.stringify(response, null, 2));
-      throw new Error("Ses verisi oluşturulamadı. Model yanıtı boş veya uygun formatta değil.");
-    }
+      // Eğer buraya kadar geldiyse yanıt boş
+      if (attempt < maxRetries) {
+        logger.warn(`TTS empty response, retrying... attempt ${attempt + 1}`);
+        await new Promise(r => setTimeout(r, 500));
+        continue;
+      }
 
-    return base64Audio;
-  } catch (error: any) {
-    console.error("TTS Error Full:", error);
-    throw new Error(error.message || "Ses oluşturulurken bir hata meydana geldi.");
+      throw new Error("Ses verisi oluşturulamadı. Tarayıcı sesini kullanabilirsiniz.");
+
+    } catch (error: any) {
+      lastError = error;
+
+      // API rate limit veya geçici hatalar için retry
+      if (error.message?.includes('rate') || error.message?.includes('quota')) {
+        if (attempt < maxRetries) {
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+          continue;
+        }
+      }
+
+      // Zaten bizim hatamız ise doğrudan fırlat
+      if (error.message?.includes('Tarayıcı') || error.message?.includes('Preview')) {
+        throw error;
+      }
+    }
   }
+
+  throw lastError || new Error("Ses oluşturulurken bir hata meydana geldi. Tarayıcı sesini kullanabilirsiniz.");
 };
 
 export const generateSpiritualPlan = async (mood: string): Promise<SpiritualPlan> => {
-  if (!apiKey) throw new Error("API Anahtarı eksik.");
+  const aiInstance = await getAI();
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+    const response = await aiInstance.models.generateContent({
+      model: "gemini-2.0-flash",
       contents: `The user is feeling: "${mood}". Create a highly personalized 3-day spiritual plan in Turkish.
         
         IMPORTANT: The plan MUST be specifically tailored to the mood "${mood}". 
@@ -414,7 +658,7 @@ export const generateSpiritualPlan = async (mood: string): Promise<SpiritualPlan
     const text = response.text;
 
     if (!text) {
-      console.warn("AI returned empty text, using fallback.");
+      logger.warn("AI returned empty text, using fallback.");
       return getFallbackPlan(mood);
     }
 
@@ -423,7 +667,7 @@ export const generateSpiritualPlan = async (mood: string): Promise<SpiritualPlan
 
     // Ensure 'days' array exists to prevent crashes
     if (!parsed.days || !Array.isArray(parsed.days)) {
-      console.warn("AI returned malformed JSON (missing days), using fallback days.");
+      logger.warn("AI returned malformed JSON (missing days), using fallback days.");
       const fallback = getFallbackPlan(mood);
       parsed.days = fallback.days;
       if (!parsed.title) parsed.title = fallback.title;
@@ -433,18 +677,18 @@ export const generateSpiritualPlan = async (mood: string): Promise<SpiritualPlan
     return parsed as SpiritualPlan;
 
   } catch (error: any) {
-    console.warn("Spiritual Plan Generation Failed (Using Fallback):", error.message || error);
+    logger.warn("Spiritual Plan Generation Failed (Using Fallback):", error.message || error);
     // Return dynamic fallback plan instead of static one
     return getFallbackPlan(mood);
   }
 };
 
 export const interpretDream = async (dreamText: string): Promise<string> => {
-  if (!apiKey) throw new Error("API Anahtarı eksik.");
+  const aiInstance = await getAI();
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+    const response = await aiInstance.models.generateContent({
+      model: "gemini-2.0-flash",
       contents: `Rüya metni: "${dreamText}"`,
       config: {
         systemInstruction: `Sen İslami kaynaklara (İmam Nablusi, İbn-i Sirin, İmam Cafer-i Sadık) hakim, hikmetli bir rüya tabircisisin. 
@@ -460,7 +704,7 @@ export const interpretDream = async (dreamText: string): Promise<string> => {
 
     return response.text || "Rüyanız şu an yorumlanamıyor. Lütfen daha sonra tekrar deneyin.";
   } catch (error: any) {
-    console.error("Dream Interpretation Error:", error);
+    logger.error("Dream Interpretation Error:", error);
     throw new Error("Yorumlama sırasında bir hata oluştu.");
   }
 };

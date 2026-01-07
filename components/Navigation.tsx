@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, Plus, Search, Users, User as UserIcon, Shield } from 'lucide-react';
+import { Home, Plus, Search, Users, User as UserIcon } from 'lucide-react';
 import { ViewState, User } from '../types';
 
 interface NavigationProps {
@@ -45,13 +45,6 @@ const Navigation: React.FC<NavigationProps> = ({ currentView, setView, user }) =
           <UserIcon size={22} strokeWidth={currentView === 'SETTINGS' ? 2.5 : 1.5} />
           <span className="text-[9px] font-serif tracking-wide font-bold">Profilim</span>
         </button>
-
-        {user?.role === 'admin' && (
-          <button onClick={() => setView('ADMIN')} className={navItemClass('ADMIN')}>
-            <Shield size={22} strokeWidth={currentView === 'ADMIN' ? 2.5 : 1.5} className="text-amber-600" />
-            <span className="text-[9px] font-serif tracking-wide text-amber-600 font-bold">Yönetici</span>
-          </button>
-        )}
       </div>
     </div>
   );

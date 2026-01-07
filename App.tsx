@@ -2,24 +2,31 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Navigation from './components/Navigation';
 import Counter from './components/Counter';
-import AddPrayer from './components/AddPrayer';
-import SearchPrayer from './components/SearchPrayer';
-import Profile from './components/Profile';
-import Settings from './components/Settings';
 import Logo from './components/Logo';
-import ReminderModal from './components/ReminderModal';
-import ShareModal from './components/ShareModal';
-import HistoryModal from './components/HistoryModal';
-import SocialHub from './components/SocialHub';
-import PrayerTimes from './components/PrayerTimes';
-import Auth from './components/Auth';
-import AdminDashboard from './components/AdminDashboard';
-import PrayerCoach from './components/PrayerCoach';
-import DreamInterpreter from './components/DreamInterpreter';
-import PremiumModal from './components/PremiumModal';
+const AddPrayer = React.lazy(() => import('./components/AddPrayer'));
+const SearchPrayer = React.lazy(() => import('./components/SearchPrayer'));
+const Profile = React.lazy(() => import('./components/Profile'));
+const Settings = React.lazy(() => import('./components/Settings'));
+const ReminderModal = React.lazy(() => import('./components/ReminderModal'));
+const ShareModal = React.lazy(() => import('./components/ShareModal'));
+const HistoryModal = React.lazy(() => import('./components/HistoryModal'));
+const SocialHub = React.lazy(() => import('./components/SocialHub'));
+const NotificationCenter = React.lazy(() => import('./components/NotificationCenter'));
+const PrayerTimes = React.lazy(() => import('./components/PrayerTimes'));
+const Auth = React.lazy(() => import('./components/Auth'));
+const PrayerCoach = React.lazy(() => import('./components/PrayerCoach'));
+const DreamInterpreter = React.lazy(() => import('./components/DreamInterpreter'));
+const PremiumModal = React.lazy(() => import('./components/PremiumModal'));
+import LoadingScreen from './components/LoadingScreen';
 import { dbService } from './services/db';
-import { getQuotes } from './services/supabase';
+import { getQuotes, getActiveBanners, getAppConfig, Banner, AppConfig } from './services/supabase';
+import { runSeed } from './services/seedData';
 import { authService } from './services/authService';
+
+// Expose runSeed to window for console access
+if (typeof window !== 'undefined') {
+  (window as any).runSeed = runSeed;
+}
 import { Loader2 } from 'lucide-react';
 import { defaultPrayers } from './data/defaults';
 import { quotes } from './data/quotes';
@@ -36,14 +43,20 @@ const TasbihIcon: React.FC<{ size?: number; className?: string }> = ({ size = 24
   </svg>
 );
 
-const App: React.FC = () => {
+// MOBILE APP - Clean mobile-only code, no admin logic
+const MobileApp: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [isDataLoading, setIsDataLoading] = useState(false); // Data loading state
   const [view, setView] = useState<ViewState>('HOME');
   const [prayers, setPrayers] = useState<Prayer[]>([]);
   const [selectedPrayer, setSelectedPrayer] = useState<Prayer | null>(null);
   const [dailyQuote, setDailyQuote] = useState<Quote>(quotes[0]);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [activeBanners, setActiveBanners] = useState<Banner[]>([]);
+  const [appConfig, setAppConfig] = useState<AppConfig>({});
+  const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
 
   // Settings State
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
@@ -74,6 +87,12 @@ const App: React.FC = () => {
       // Get initial user after init
       const currentUser = authService.getCurrentUser();
       setUser(currentUser);
+
+      // If on admin route and user is admin, set view immediately
+      if (window.location.pathname === '/admin' && currentUser?.role === 'admin') {
+        setView('ADMIN');
+      }
+
       setAuthLoading(false);
     };
 
@@ -101,6 +120,8 @@ const App: React.FC = () => {
     setVisibleCount(10);
   }, [libraryQuery, activeTag]);
 
+
+
   useEffect(() => {
     if (user) {
       // Set userId for Supabase sync
@@ -108,10 +129,25 @@ const App: React.FC = () => {
       initializeData();
       loadDailyQuote();
       checkDeepLink();
+      loadBannersAndConfig();
     } else {
       dbService.setUserId(null);
     }
   }, [user]);
+
+  const loadBannersAndConfig = async () => {
+    try {
+      const [banners, config] = await Promise.all([
+        getActiveBanners(user?.isPremium),
+        getAppConfig()
+      ]);
+      setActiveBanners(banners);
+      setAppConfig(config);
+      setIsMaintenanceMode(config.maintenance_mode?.enabled || false);
+    } catch (e) {
+      console.warn('Failed to load banners/config:', e);
+    }
+  };
 
   const loadDailyQuote = async () => {
     try {
@@ -229,17 +265,29 @@ const App: React.FC = () => {
   };
 
   const initializeData = async () => {
+    setIsDataLoading(true);
     try {
       // dbService will sync from Supabase if available
       let loadedPrayers = await dbService.getAllPrayers();
+
       if (loadedPrayers.length === 0) {
         // First time - seed with defaults
         await dbService.seedPrayers(defaultPrayers);
         loadedPrayers = await dbService.getAllPrayers();
+      } else {
+        // Run cleanup for existing users to fix duplicate issues
+        const removed = await dbService.runDeduplication();
+        if (removed > 0) {
+          // Reload if we removed items
+          loadedPrayers = await dbService.getAllPrayers();
+        }
       }
+
       setPrayers(loadedPrayers.sort((a, b) => b.lastUpdated - a.lastUpdated));
     } catch (error) {
       console.error("Failed to load prayers", error);
+    } finally {
+      setIsDataLoading(false);
     }
   };
 
@@ -353,17 +401,32 @@ const App: React.FC = () => {
 
   // --- RENDERING ---
 
-  // Loading state while checking auth
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-[#ecfdf5] flex items-center justify-center">
-        <Loader2 className="animate-spin text-teal-600" size={48} />
-      </div>
-    );
+  // Loading state while checking auth or fetching initial data
+  if (authLoading || isDataLoading) {
+    return <LoadingScreen message={authLoading ? "Başlatılıyor..." : "Dualar Yükleniyor..."} />;
   }
 
   if (!user) {
     return <Auth onLogin={(u) => setUser(u)} />;
+  }
+
+  // Maintenance Mode Screen
+  if (isMaintenanceMode) {
+    return (
+      <div className="min-h-screen bg-stone-900 flex items-center justify-center p-8">
+        <div className="text-center">
+          <div className="w-20 h-20 bg-amber-500 rounded-full flex items-center justify-center mx-auto mb-6">
+            <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-4">Bakım Modu</h1>
+          <p className="text-stone-400 max-w-sm mx-auto">
+            {appConfig.maintenance_mode?.message || 'Uygulama bakımda, lütfen daha sonra tekrar deneyin.'}
+          </p>
+        </div>
+      </div>
+    );
   }
 
   const renderContent = () => {
@@ -379,7 +442,7 @@ const App: React.FC = () => {
       );
     }
     if (view === 'ADD') {
-      return <AddPrayer onSave={handleSavePrayer} onCancel={() => setView('HOME')} initialData={draftPrayer} />;
+      return <AddPrayer onSave={handleSavePrayer} onCancel={() => setView('HOME')} initialData={draftPrayer} onOpenPremium={() => setShowPremiumModal(true)} />;
     }
     if (view === 'SEARCH') {
       return (
@@ -420,21 +483,33 @@ const App: React.FC = () => {
       );
     }
     if (view === 'SETTINGS') {
-      return <Settings notificationsEnabled={notificationsEnabled} setNotificationsEnabled={setNotificationsEnabled} user={user} onLogout={handleLogout} />;
+      return <Settings notificationsEnabled={notificationsEnabled} setNotificationsEnabled={setNotificationsEnabled} user={user} onLogout={handleLogout} prayers={prayers} onOpenPrayer={(prayer) => { setSelectedPrayer(prayer); setView('COUNTER'); }} />;
     }
     if (view === 'SOCIAL') {
       return <SocialHub onClose={() => setView('HOME')} user={user} />;
     }
-    if (view === 'ADMIN' && user.role === 'admin') {
-      return <AdminDashboard prayers={prayers} onBack={() => setView('HOME')} />;
-    }
 
     // HOME VIEW
+
     return (
       <div className="h-full pb-32 relative overflow-y-auto no-scrollbar">
+        <NotificationCenter
+          isOpen={showNotifications}
+          onClose={() => setShowNotifications(false)}
+          user={user}
+        />
         <div className="islamic-pattern absolute inset-0 z-0 pointer-events-none opacity-10 fixed"></div>
 
         <div className="bg-white/60 backdrop-blur-md pt-8 pb-8 px-4 rounded-b-[2rem] shadow-sm border-b border-emerald-100/50 z-10 flex flex-col items-center text-center relative">
+
+          <button
+            onClick={() => setShowNotifications(true)}
+            className="absolute top-6 right-6 p-2 bg-white/80 rounded-full border border-stone-200 text-stone-500 hover:text-orange-500 hover:border-orange-200 transition-colors shadow-sm"
+          >
+            <Bell size={20} />
+            {/* Optional: Add red dot if unread */}
+          </button>
+
           <div className="mb-2 p-1 border-2 border-emerald-100 rounded-xl bg-white/80">
             <Logo size={80} />
           </div>
@@ -451,7 +526,23 @@ const App: React.FC = () => {
           <PrayerTimes />
         </div>
 
-        <div className="grid grid-cols-2 gap-4 px-6 -mt-5 z-20 relative">
+        {/* Dynamic Banners */}
+        {activeBanners.length > 0 && (
+          <div className="px-6 mt-4 z-20 relative">
+            {activeBanners.slice(0, 1).map(banner => (
+              <div
+                key={banner.id}
+                className="p-4 rounded-2xl shadow-lg"
+                style={{ backgroundColor: banner.bg_color || '#10b981', color: banner.text_color || '#fff' }}
+              >
+                <h4 className="font-bold text-lg">{banner.title}</h4>
+                {banner.message && <p className="text-sm opacity-90 mt-1">{banner.message}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className={`grid grid-cols-2 gap-4 px-6 z-20 relative ${activeBanners.length > 0 ? 'mt-4' : '-mt-5'}`}>
           <div className="bg-white/90 p-4 rounded-xl shadow-[0_4px_15px_-5px_rgba(0,0,0,0.05)] border border-emerald-100 flex flex-col items-center justify-center backdrop-blur-sm">
             <div className="mb-1 text-teal-600 bg-teal-50 p-1.5 rounded-full">
               <BookOpen size={16} />
@@ -616,20 +707,23 @@ const App: React.FC = () => {
     );
   };
 
-  const showNavigation = view === 'HOME' || view === 'SEARCH' || view === 'PROFILE' || view === 'SETTINGS' || view === 'SOCIAL' || view === 'ADMIN';
+  const showNavigation = view === 'HOME' || view === 'SEARCH' || view === 'PROFILE' || view === 'SETTINGS' || view === 'SOCIAL';
 
   return (
     <div className="font-sans text-stone-900 bg-[#ecfdf5] w-full h-[100dvh] max-w-md mx-auto relative shadow-2xl overflow-hidden flex flex-col select-none">
-      <div className="flex-1 w-full relative overflow-hidden">
-        {renderContent()}
-      </div>
-      {showNavigation && <Navigation currentView={view} setView={handleNavigationChange} user={user} />}
-      {activeReminderPrayer && <ReminderModal prayer={activeReminderPrayer} onSave={(updated) => { handleUpdatePrayer(updated); setActiveReminderPrayer(null); }} onClose={() => setActiveReminderPrayer(null)} />}
-      {activeSharePrayer && <ShareModal prayer={activeSharePrayer} onClose={() => setActiveSharePrayer(null)} />}
-      {activeHistoryPrayer && <HistoryModal prayer={activeHistoryPrayer} onClose={() => setActiveHistoryPrayer(null)} />}
-      {showPremiumModal && <PremiumModal onClose={() => setShowPremiumModal(false)} onPurchase={handlePurchasePremium} />}
+      <React.Suspense fallback={<LoadingScreen message="Yükleniyor..." />}>
+        <div className="flex-1 w-full relative overflow-hidden">
+          {renderContent()}
+        </div>
+        {showNavigation && <Navigation currentView={view} setView={handleNavigationChange} user={user} />}
+        {activeReminderPrayer && <ReminderModal prayer={activeReminderPrayer} onSave={(updated) => { handleUpdatePrayer(updated); setActiveReminderPrayer(null); }} onClose={() => setActiveReminderPrayer(null)} />}
+        {activeSharePrayer && <ShareModal prayer={activeSharePrayer} onClose={() => setActiveSharePrayer(null)} />}
+        {activeHistoryPrayer && <HistoryModal prayer={activeHistoryPrayer} onClose={() => setActiveHistoryPrayer(null)} />}
+        {showPremiumModal && <PremiumModal onClose={() => setShowPremiumModal(false)} onPurchase={handlePurchasePremium} />}
+      </React.Suspense>
     </div>
   );
 };
 
-export default App;
+// Export MobileApp as default for non-admin routes
+export default MobileApp;

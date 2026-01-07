@@ -1,4 +1,6 @@
 import { Prayer, HatimPartStatus } from '../types';
+import { defaultPrayers } from '../data/defaults';
+import { logger } from '../utils/logger';
 import {
   supabase,
   getCatalogPrayers,
@@ -31,6 +33,10 @@ class DatabaseService {
     this.userId = userId;
   }
 
+  getUserId(): string | null {
+    return this.userId;
+  }
+
   async init(): Promise<void> {
     // Check Supabase availability
     try {
@@ -38,7 +44,7 @@ class DatabaseService {
       this.supabaseAvailable = tables.prayers && tables.customPrayers;
     } catch (e) {
       this.supabaseAvailable = false;
-      console.warn('Supabase not available, using offline mode');
+      logger.warn('Supabase not available, using offline mode');
     }
 
     return new Promise((resolve, reject) => {
@@ -73,13 +79,27 @@ class DatabaseService {
 
   async syncFromSupabase(): Promise<Prayer[]> {
     if (!this.supabaseAvailable || !this.userId) {
-      console.log('Supabase sync skipped (not available or no user)');
+      logger.log('Supabase sync skipped (not available or no user)');
       return this.getAllPrayersLocal();
     }
 
     try {
       // 1. Get catalog prayers from Supabase
-      const catalogPrayers = await getCatalogPrayers();
+      let catalogPrayers = await getCatalogPrayers();
+
+      // Fallback: If catalog fetch fails or returns empty (e.g. network issue or RLS), use defaults
+      if (!catalogPrayers || catalogPrayers.length === 0) {
+        logger.warn('Supabase catalog empty/failed, using default prayers fallback');
+        catalogPrayers = defaultPrayers.map(p => ({
+          id: p.id,
+          title: p.title,
+          arabic: p.arabic || null,
+          turkish: p.turkish,
+          meaning: p.meaning || null,
+          target_count: p.targetCount,
+          tags: p.tags
+        }));
+      }
 
       // 2. Get user's custom prayers
       const customPrayers = await getCustomPrayers(this.userId);
@@ -134,14 +154,15 @@ class DatabaseService {
       }
 
       // 5. Cache to IndexedDB
-      await this.cachePrayersLocally(mergedPrayers);
+      const uniquePrayers = Array.from(new Map(mergedPrayers.map(p => [p.id, p])).values());
+      await this.cachePrayersLocally(uniquePrayers);
 
       // 6. Save last sync time
       await this.setSyncMeta('lastSync', Date.now());
 
-      return mergedPrayers;
+      return uniquePrayers;
     } catch (error) {
-      console.error('Sync from Supabase failed:', error);
+      logger.error('Sync from Supabase failed:', error);
       // Fallback to local data
       return this.getAllPrayersLocal();
     }
@@ -176,7 +197,7 @@ class DatabaseService {
 
       return true;
     } catch (error) {
-      console.error('Sync to Supabase failed:', error);
+      logger.error('Sync to Supabase failed:', error);
       return false;
     }
   }
@@ -197,11 +218,34 @@ class DatabaseService {
   private async getAllPrayersLocal(): Promise<Prayer[]> {
     if (!this.db) await this.init();
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([STORE_PRAYERS], 'readonly');
+      const transaction = this.db!.transaction([STORE_PRAYERS], 'readwrite');
       const store = transaction.objectStore(STORE_PRAYERS);
       const request = store.getAll();
 
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = async () => {
+        const prayers = request.result;
+
+        // If DB is empty or has very few items (indicating partial/failed sync), merge with defaults
+        if (prayers.length < 50) {
+          logger.log('Local DB has few items (' + prayers.length + '), merging with defaults...');
+          // Import defaults dynamically to avoid circular dependency issues if any
+          const { defaultPrayers } = await import('../data/defaults');
+
+          // Helper to add missing
+          for (const defPrayer of defaultPrayers) {
+            const exists = prayers.some((p: Prayer) => this.normalizeTitle(p.title) === this.normalizeTitle(defPrayer.title));
+            if (!exists) {
+              store.put(defPrayer);
+              prayers.push(defPrayer);
+            }
+          }
+          const uniquePrayers = Array.from(new Map(prayers.map((p: Prayer) => [p.id, p])).values());
+          resolve(uniquePrayers);
+        } else {
+          const uniquePrayers = Array.from(new Map(prayers.map((p: Prayer) => [p.id, p])).values());
+          resolve(uniquePrayers);
+        }
+      };
       request.onerror = () => reject(request.error);
     });
   }
@@ -222,7 +266,7 @@ class DatabaseService {
     // Then sync to Supabase in background
     if (this.supabaseAvailable && this.userId) {
       this.syncToSupabase(prayer).catch(err => {
-        console.warn('Background sync failed:', err);
+        logger.warn('Background sync failed:', err);
       });
     }
   }
@@ -276,7 +320,7 @@ class DatabaseService {
         // Also delete any audio
         await deletePrayerAudio(this.userId, id);
       } catch (err) {
-        console.warn('Supabase delete failed:', err);
+        logger.warn('Supabase delete failed:', err);
       }
     }
   }
@@ -410,6 +454,77 @@ class DatabaseService {
       const store = transaction.objectStore(STORE_HATIM);
       const request = store.clear();
       request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+  // --- Maintenance Methods ---
+
+  private normalizeTitle(title: string): string {
+    return title.trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  async runDeduplication(): Promise<number> {
+    if (!this.db) await this.init();
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([STORE_PRAYERS], 'readwrite');
+      const store = transaction.objectStore(STORE_PRAYERS);
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const prayers = request.result as Prayer[];
+        const groups = new Map<string, Prayer[]>();
+
+        // Group by normalized title
+        prayers.forEach(p => {
+          const key = this.normalizeTitle(p.title);
+          if (!groups.has(key)) {
+            groups.set(key, []);
+          }
+          groups.get(key)!.push(p);
+        });
+
+        let removedCount = 0;
+
+        // Process groups
+        groups.forEach((group, key) => {
+          if (group.length > 1) {
+            logger.log(`Found duplicates for "${key}": ${group.length} items`);
+
+            // Sort: Prefer items with Supabase-like IDs (uuids) or longer history
+            // Actually, we should prefer the one that looks most "official" or oldest?
+            // Let's just pick the first one as master, but merge counts.
+            // Better: Pick the one that might be a valid UUID vs a generated one if we can tell.
+            // For now, just taking the first one is safe enough if we merge data.
+
+            const master = group[0];
+            let totalCount = 0;
+            let combinedHistory: any[] = [];
+
+            group.forEach(p => {
+              totalCount += p.currentCount;
+              if (p.history) combinedHistory = [...combinedHistory, ...p.history];
+            });
+
+            // Update master
+            master.currentCount = totalCount;
+            master.history = combinedHistory;
+
+            // Delete others
+            for (let i = 1; i < group.length; i++) {
+              store.delete(group[i].id);
+              removedCount++;
+            }
+
+            // Save master
+            store.put(master);
+          }
+        });
+
+        logger.log(`Deduplication complete. Removed ${removedCount} duplicates.`);
+        resolve(removedCount);
+      };
+
       request.onerror = () => reject(request.error);
     });
   }

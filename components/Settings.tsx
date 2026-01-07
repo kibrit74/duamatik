@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, Shield, Smartphone, Database, DownloadCloud, Check, User as UserIcon, AlertCircle, LogOut, Mail, Crown, MapPin } from 'lucide-react';
+import { Bell, Smartphone, History, User as UserIcon, AlertCircle, LogOut, Mail, Crown, MapPin, ArrowRight, Calendar } from 'lucide-react';
 import { dbService } from '../services/db';
 import { defaultPrayers } from '../data/defaults';
-import { User } from '../types';
+import { User, Prayer } from '../types';
 
 // @ts-ignore
 import { Capacitor } from '@capacitor/core';
@@ -12,13 +12,27 @@ interface SettingsProps {
   setNotificationsEnabled: (enabled: boolean) => void;
   user?: User | null;
   onLogout?: () => void;
+  prayers?: Prayer[];
+  onOpenPrayer?: (prayer: Prayer) => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ notificationsEnabled, setNotificationsEnabled, user, onLogout }) => {
+const Settings: React.FC<SettingsProps> = ({ notificationsEnabled, setNotificationsEnabled, user, onLogout, prayers = [], onOpenPrayer }) => {
   const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>('default');
-  const [updatingLibrary, setUpdatingLibrary] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const isNative = Capacitor.isNativePlatform();
+
+  // Son açılan dualar (currentCount > 0 ve lastUpdated'e göre sıralı)
+  // Son açılan dualar (currentCount > 0 ve lastUpdated'e göre sıralı)
+  // Duplicate ID'leri filtrele
+  const uniquePrayersMap = new Map();
+  prayers.forEach(p => {
+    if (p.currentCount > 0) {
+      uniquePrayersMap.set(p.id, p);
+    }
+  });
+
+  const recentPrayers = Array.from(uniquePrayersMap.values())
+    .sort((a, b) => b.lastUpdated - a.lastUpdated)
+    .slice(0, 5);
 
   useEffect(() => {
     if ('Notification' in window) {
@@ -55,10 +69,8 @@ const Settings: React.FC<SettingsProps> = ({ notificationsEnabled, setNotificati
 
   const toggleNotifications = () => {
     if (notificationsEnabled) {
-      // Turn off
       setNotificationsEnabled(false);
     } else {
-      // Turn on
       if (permissionStatus === 'granted') {
         setNotificationsEnabled(true);
       } else if (permissionStatus === 'denied') {
@@ -85,26 +97,6 @@ const Settings: React.FC<SettingsProps> = ({ notificationsEnabled, setNotificati
     }
   };
 
-  const handleUpdateLibrary = async () => {
-    setUpdatingLibrary(true);
-    setUpdateStatus(null);
-    try {
-      const addedCount = await dbService.addMissingPrayers(defaultPrayers);
-      setTimeout(() => {
-        if (addedCount > 0) {
-          setUpdateStatus(`${addedCount} yeni dua kütüphaneye eklendi.`);
-        } else {
-          setUpdateStatus("Kütüphaneniz zaten güncel.");
-        }
-        setUpdatingLibrary(false);
-      }, 800);
-    } catch (error) {
-      console.error(error);
-      setUpdateStatus("Güncelleme sırasında hata oluştu.");
-      setUpdatingLibrary(false);
-    }
-  };
-
   return (
     <div className="h-full overflow-y-auto bg-[#ecfdf5] pb-28 relative">
       <div className="islamic-pattern fixed inset-0 z-0 pointer-events-none opacity-10"></div>
@@ -112,7 +104,7 @@ const Settings: React.FC<SettingsProps> = ({ notificationsEnabled, setNotificati
       {/* Header */}
       <div className="bg-white/90 backdrop-blur-md px-6 py-6 border-b border-emerald-100 relative z-10 shadow-sm">
         <h2 className="text-2xl font-bold font-cinzel text-teal-900">Profilim</h2>
-        <p className="text-stone-500 text-sm font-serif">Hesap bilgilerinizi ve uygulama ayarlarını yönetin.</p>
+        <p className="text-stone-500 text-sm font-serif">Hesap bilgilerinizi ve son aktivitelerinizi görün.</p>
       </div>
 
       <div className="p-6 space-y-6 relative z-10">
@@ -176,6 +168,90 @@ const Settings: React.FC<SettingsProps> = ({ notificationsEnabled, setNotificati
           </div>
         )}
 
+        {/* Recent Prayers List */}
+        <div className="bg-white/90 rounded-2xl shadow-sm border border-emerald-50 overflow-hidden">
+          <div className="p-4 border-b border-stone-100 bg-stone-50/50 flex items-center gap-2">
+            <History size={18} className="text-amber-500" />
+            <h3 className="font-bold text-stone-700">Son Okuduğum Dualar</h3>
+            <span className="ml-auto text-xs text-teal-600 bg-teal-50 px-2 py-0.5 rounded-full">{recentPrayers.length}</span>
+          </div>
+          <div className="p-3 space-y-2">
+            {recentPrayers.length === 0 ? (
+              <div className="text-center py-6 text-stone-400">
+                <History size={24} className="mx-auto mb-2 opacity-50" />
+                <p className="text-sm">Henüz bir dua okumadınız.</p>
+              </div>
+            ) : (
+              recentPrayers.map((prayer) => (
+                <div
+                  key={prayer.id}
+                  onClick={() => onOpenPrayer?.(prayer)}
+                  className="bg-stone-50 p-3 rounded-xl flex items-center justify-between cursor-pointer hover:bg-teal-50 transition-colors"
+                >
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-bold text-stone-700 text-sm truncate">{prayer.title}</h4>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs text-teal-600 font-mono font-bold">
+                        {prayer.currentCount}{prayer.targetCount > 0 ? `/${prayer.targetCount}` : ''}
+                      </span>
+                      <span className="text-[10px] text-stone-400 flex items-center gap-1">
+                        <Calendar size={10} />
+                        {new Date(prayer.lastUpdated).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' })}
+                      </span>
+                    </div>
+                  </div>
+                  <ArrowRight size={16} className="text-stone-400" />
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Custom Prayers List */}
+        <div className="bg-white/90 rounded-2xl shadow-sm border border-emerald-50 overflow-hidden">
+          <div className="p-4 border-b border-stone-100 bg-stone-50/50 flex items-center gap-2">
+            <Smartphone size={18} className="text-teal-600" />
+            <h3 className="font-bold text-stone-700">Eklediğim Dualar</h3>
+            <span className="ml-auto text-xs text-teal-600 bg-teal-50 px-2 py-0.5 rounded-full">
+              {prayers.filter(p => (p as any)._isCustom).length}
+            </span>
+          </div>
+          <div className="p-3 space-y-2">
+            {prayers.filter(p => (p as any)._isCustom).length === 0 ? (
+              <div className="text-center py-6 text-stone-400">
+                <Smartphone size={24} className="mx-auto mb-2 opacity-50" />
+                <p className="text-sm">Henüz kendiniz dua eklemediniz.</p>
+                <p className="text-xs mt-1">Ana sayfadaki (+) butonundan ekleyebilirsiniz.</p>
+              </div>
+            ) : (
+              prayers
+                .filter(p => (p as any)._isCustom)
+                .sort((a, b) => b.lastUpdated - a.lastUpdated)
+                .map((prayer) => (
+                  <div
+                    key={prayer.id}
+                    onClick={() => onOpenPrayer?.(prayer)}
+                    className="bg-stone-50 p-3 rounded-xl flex items-center justify-between cursor-pointer hover:bg-teal-50 transition-colors"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-bold text-stone-700 text-sm truncate">{prayer.title}</h4>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs text-teal-600 font-mono font-bold">
+                          {prayer.currentCount}{prayer.targetCount > 0 ? `/${prayer.targetCount}` : ''}
+                        </span>
+                        <span className="text-[10px] text-stone-400 flex items-center gap-1">
+                          <Calendar size={10} />
+                          {new Date(prayer.lastUpdated).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' })}
+                        </span>
+                      </div>
+                    </div>
+                    <ArrowRight size={16} className="text-stone-400" />
+                  </div>
+                ))
+            )}
+          </div>
+        </div>
+
         {/* Notification Settings Card */}
         <div className="bg-white/90 rounded-2xl shadow-sm border border-emerald-50 overflow-hidden">
           <div className="p-4 border-b border-stone-100 bg-stone-50/50 flex items-center gap-2">
@@ -210,51 +286,6 @@ const Settings: React.FC<SettingsProps> = ({ notificationsEnabled, setNotificati
               <Smartphone size={16} />
               Bildirimi Test Et
             </button>
-          </div>
-        </div>
-
-        {/* Data Management Card */}
-        <div className="bg-white/90 rounded-2xl shadow-sm border border-emerald-50 overflow-hidden">
-          <div className="p-4 border-b border-stone-100 bg-stone-50/50 flex items-center gap-2">
-            <Database size={18} className="text-teal-700" />
-            <h3 className="font-bold text-stone-700">Veri Yönetimi</h3>
-          </div>
-          <div className="p-5 space-y-4">
-            <div className="flex flex-col gap-2">
-              <p className="text-sm text-stone-600">
-                Uygulama kütüphanesini en yeni dualar ve zikirlerle güncelleyin.
-              </p>
-              <button
-                onClick={handleUpdateLibrary}
-                disabled={updatingLibrary}
-                className={`w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all ${updateStatus && updateStatus.includes('hata') ? 'bg-red-50 text-red-600 border border-red-200' : updateStatus ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-stone-800 text-stone-50 hover:bg-stone-700'}`}
-              >
-                {updatingLibrary ? (
-                  <span className="animate-pulse">Güncelleniyor...</span>
-                ) : updateStatus ? (
-                  <>
-                    <Check size={16} /> {updateStatus}
-                  </>
-                ) : (
-                  <>
-                    <DownloadCloud size={16} /> Kütüphaneyi Genişlet
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Privacy Info Card (Static) */}
-        <div className="bg-white/90 rounded-2xl shadow-sm border border-emerald-50 overflow-hidden opacity-80">
-          <div className="p-4 border-b border-stone-100 bg-stone-50/50 flex items-center gap-2">
-            <Shield size={18} className="text-teal-700" />
-            <h3 className="font-bold text-stone-700">Gizlilik & Veri</h3>
-          </div>
-          <div className="p-5 text-sm text-stone-600 space-y-2">
-            <p>
-              Tüm dua kayıtlarınız ve istatistikleriniz cihazınızda saklanır.
-            </p>
           </div>
         </div>
 

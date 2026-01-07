@@ -1,360 +1,325 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { generateSpiritualPlan } from '../services/geminiService';
+import { createChatHistory, sendChatMessage, ChatMessage } from '../services/geminiService';
+import { saveSpiritualPlan, getAdRates } from '../services/supabase';
 import { SpiritualPlan } from '../types';
-import { Sparkles, CloudRain, Coffee, Frown, Brain, Heart, CheckCircle2, User, Fingerprint, Calendar, Sun, Moon, Send, ArrowRight, X } from 'lucide-react';
+import { Sparkles, Send, ArrowRight, User, Save, CheckCircle2, Sun, Moon } from 'lucide-react';
+import { dbService } from '../services/db';
 import RewardAdModal from './RewardAdModal';
 
 interface PrayerCoachProps {
-  onClose: () => void;
-  isPremium: boolean;
-  onOpenPremium: () => void;
+    onClose: () => void;
+    isPremium: boolean;
+    onOpenPremium: () => void;
 }
 
-const MOODS = [
-  { id: 'anxious', label: 'Kaygılı', icon: CloudRain, color: 'bg-blue-100 text-blue-600', desc: "İçim daralıyor" },
-  { id: 'sad', label: 'Hüzünlü', icon: Frown, color: 'bg-indigo-100 text-indigo-600', desc: "Mutsuzum" },
-  { id: 'confused', label: 'Kararsız', icon: Brain, color: 'bg-purple-100 text-purple-600', desc: "Kafam karışık" },
-  { id: 'tired', label: 'Yorgun', icon: Coffee, color: 'bg-amber-100 text-amber-600', desc: "Gücüm yok" },
-  { id: 'grateful', label: 'Şükürlü', icon: Heart, color: 'bg-rose-100 text-rose-600', desc: "Huzurluyum" },
-];
-
-type Message = {
-  id: string;
-  sender: 'ai' | 'user';
-  text?: string;
-  type: 'text' | 'plan' | 'typing';
-  planData?: SpiritualPlan;
+type MessageItem = {
+    id: string;
+    sender: 'ai' | 'user';
+    text?: string;
+    type: 'text' | 'plan' | 'typing';
+    planData?: SpiritualPlan;
 };
 
 const PrayerCoach: React.FC<PrayerCoachProps> = ({ onClose, isPremium, onOpenPremium }) => {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [inputVisible, setInputVisible] = useState(true);
-  const [showTextInput, setShowTextInput] = useState(false);
-  const [customInput, setCustomInput] = useState('');
-  
-  const [showAdModal, setShowAdModal] = useState(false);
-  const [pendingMood, setPendingMood] = useState<string | null>(null);
+    const [messages, setMessages] = useState<MessageItem[]>([]);
+    const [inputText, setInputText] = useState('');
+    const [chatSession, setChatSession] = useState<any>(null);
+    const [isTyping, setIsTyping] = useState(false);
+    const [savingPlanId, setSavingPlanId] = useState<string | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const typingTimeoutRef = useRef<number | null>(null);
+    // Ad modal states for free users
+    const [showAdModal, setShowAdModal] = useState(false);
+    const [adWatched, setAdWatched] = useState(false);
+    const [adRate, setAdRate] = useState(2);
 
-  useEffect(() => {
-    // Initial Greeting - Warm and Spiritual
-    const t1 = setTimeout(() => {
-        addMessage({
-            id: 'init-1',
-            sender: 'ai',
-            type: 'text',
-            text: 'Selamun Aleyküm canım kardeşim. 🌹'
-        });
-    }, 500);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    const t2 = setTimeout(() => {
-        addMessage({
-            id: 'init-2',
-            sender: 'ai',
-            type: 'text',
-            text: 'Gönlünü ferahlatmak, sana özel manevi bir reçete hazırlamak için buradayım. Bugün kalbin nasıl hissediyor?'
-        });
-    }, 1500);
+    const initializedRef = useRef(false);
 
-    return () => {
-        clearTimeout(t1);
-        clearTimeout(t2);
-        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    // Init Chat - show ad modal for free users first
+    useEffect(() => {
+        if (initializedRef.current) return;
+
+        // For free users, load ad rate and show modal
+        if (!isPremium) {
+            getAdRates().then(rates => {
+                setAdRate(rates.chat || 2);
+                setShowAdModal(true);
+            });
+            return;
+        }
+
+        // For premium users, init chat directly
+        initChat();
+    }, [isPremium]);
+
+    const initChat = async () => {
+        if (initializedRef.current) return;
+        initializedRef.current = true;
+
+        const session = await createChatHistory();
+        setChatSession(session);
+
+        setTimeout(() => {
+            addMessage({
+                id: 'init-1',
+                sender: 'ai',
+                type: 'text',
+                text: 'Selamun Aleyküm canım kardeşim. 🌹\n\nBen senin Manevi Asistanınım. Dertleşmek, huzur bulmak veya sana özel bir manevi program hazırlamamı istersen buradayım. Bugün kalbin nasıl?'
+            });
+        }, 500);
     };
-  }, []);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, showTextInput]);
+    const handleAdComplete = () => {
+        setShowAdModal(false);
+        setAdWatched(true);
+        initChat();
+    };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+    useEffect(() => {
+        if (!isPremium && !adWatched) return;
+        scrollToBottom();
+    }, [messages, isPremium, adWatched]);
 
-  const addMessage = (msg: Message) => {
-    setMessages(prev => [...prev, msg]);
-  };
+    const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    };
 
-  const initiateMoodProcessing = (moodText: string) => {
-      if (isPremium) {
-          handleProcessMood(moodText);
-      } else {
-          setPendingMood(moodText);
-          setShowAdModal(true);
-      }
-  };
+    const addMessage = (msg: MessageItem) => {
+        setMessages(prev => [...prev, msg]);
+    };
 
-  const handleAdComplete = () => {
-      setShowAdModal(false);
-      if (pendingMood) {
-          handleProcessMood(pendingMood);
-          setPendingMood(null);
-      }
-  };
+    const handleSend = async (e?: React.FormEvent) => {
+        e?.preventDefault();
+        if (!inputText.trim() || !chatSession) return;
 
-  const handleProcessMood = async (moodText: string) => {
-    setInputVisible(false);
-    setShowTextInput(false);
-    
-    // User Message
-    addMessage({
-        id: `user-${Date.now()}`,
-        sender: 'user',
-        type: 'text',
-        text: moodText
-    });
+        const text = inputText;
+        setInputText('');
 
-    // AI Thinking...
-    const typingId = `typing-${Date.now()}`;
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        // User Msg
+        addMessage({ id: `user-${Date.now()}`, sender: 'user', type: 'text', text });
+        setIsTyping(true);
 
-    typingTimeoutRef.current = window.setTimeout(() => {
-        addMessage({
-            id: typingId,
-            sender: 'ai',
-            type: 'typing'
-        });
-    }, 400);
+        // AI Response
+        try {
+            const response = await sendChatMessage(chatSession, text);
+            setIsTyping(false);
 
-    try {
-      // Generate plan
-      const plan = await generateSpiritualPlan(moodText);
-      
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      setMessages(prev => prev.filter(m => m.id !== typingId));
-      
-      addMessage({
-          id: `ai-plan-${Date.now()}`,
-          sender: 'ai',
-          type: 'plan',
-          planData: plan
-      });
+            // Add Text Response
+            if (response.text.trim()) {
+                addMessage({
+                    id: `ai-${Date.now()}`,
+                    sender: 'ai',
+                    type: 'text',
+                    text: response.text
+                });
+            }
 
-    } catch (e) {
-      console.error("Coach Error:", e);
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      setMessages(prev => prev.filter(m => m.id !== typingId));
-      
-      addMessage({
-          id: `err-${Date.now()}`,
-          sender: 'ai',
-          type: 'text',
-          text: 'Şu an bağlantıda bir sorun oldu. Ama niyetin hayır, akıbetin hayır olsun. Lütfen biraz sonra tekrar dene.'
-      });
-      setInputVisible(true);
+            // Add Plan Card if exists
+            if (response.plan) {
+                addMessage({
+                    id: `plan-${Date.now()}`,
+                    sender: 'ai',
+                    type: 'plan',
+                    planData: response.plan
+                });
+            }
+
+        } catch (error) {
+            console.error(error);
+            setIsTyping(false);
+            addMessage({
+                id: `err-${Date.now()}`,
+                sender: 'ai',
+                type: 'text',
+                text: 'Bağlantıda bir kopukluk oldu, lütfen tekrar dene.'
+            });
+        }
+    };
+
+    const handleSavePlan = async (plan: SpiritualPlan, msgId: string) => {
+        try {
+            setSavingPlanId(msgId);
+            const userId = dbService.getUserId(); // Use cached user ID from DB Service
+            if (!userId) {
+                alert("Kullanıcı ID bulunamadı. Lütfen tekrar giriş yapın.");
+                return;
+            }
+
+            // Varsayılan mood olarak "genel" diyebiliriz veya plan açıklamasından çıkarabiliriz.
+            // Şimdilik "Manevi Sohbet" olarak kaydedelim.
+            await saveSpiritualPlan(userId, "Manevi Sohbet", plan);
+
+            // Update UI to show saved state (local state hack for now, or just alert)
+            alert("Programın 'Profilim' sayfasına kaydedildi. Allah kabul etsin. 🌹");
+
+        } catch (e) {
+            console.error(e);
+            alert("Kaydederken bir hata oluştu.");
+        } finally {
+            setSavingPlanId(null);
+        }
+    };
+
+    // Show ad modal for free users who haven't watched ads yet
+    if (!isPremium && showAdModal) {
+        return (
+            <div className="flex flex-col h-full bg-[#ecfdf5] relative">
+                <RewardAdModal
+                    cost={adRate}
+                    title="Manevi Asistan"
+                    description="Yapay zeka destekli kişisel manevi koçunuzla sohbet etmek için reklam izleyin. Sınırsız mesaj gönderebilirsiniz."
+                    onComplete={handleAdComplete}
+                    onCancel={onClose}
+                    onOpenPremium={onOpenPremium}
+                />
+            </div>
+        );
     }
-  };
 
-  const handleCustomSubmit = (e: React.FormEvent) => {
-      e.preventDefault();
-      if(customInput.trim()) {
-          initiateMoodProcessing(customInput);
-          setCustomInput('');
-      }
-  };
+    // Show loading state while initializing for free users who watched ads
+    if (!isPremium && adWatched && !chatSession) {
+        return (
+            <div className="flex flex-col h-full bg-[#ecfdf5] relative items-center justify-center">
+                <div className="animate-spin w-8 h-8 border-4 border-teal-500 border-t-transparent rounded-full"></div>
+                <p className="mt-4 text-teal-700">Manevi Asistan hazırlanıyor...</p>
+            </div>
+        );
+    }
 
-  const handleRestart = () => {
-      setMessages([]); // Clear chat
-      setInputVisible(true);
-      setShowTextInput(false);
-      
-      // Re-trigger greetings slightly differently
-      setTimeout(() => {
-        addMessage({
-            id: 'restart-1',
-            sender: 'ai',
-            type: 'text',
-            text: 'Yeni bir sayfa açalım. Şimdi nasıl hissediyorsun?'
-        });
-      }, 500);
-  };
 
-  return (
-    <div className="flex flex-col h-full bg-[#ecfdf5] relative overflow-hidden pb-24">
-      <div className="islamic-pattern absolute inset-0 z-0 pointer-events-none opacity-10"></div>
 
-      {showAdModal && (
-        <RewardAdModal 
-            cost={1} 
-            title="Manevi Koç"
-            description="Durumunuza özel manevi bir reçete ve 3 günlük plan hazırlanması için 1 reklam izleyin."
-            onComplete={handleAdComplete} 
-            onCancel={() => {
-                setShowAdModal(false);
-                setPendingMood(null);
-            }} 
-        />
-      )}
+    return (
+        <div className="flex flex-col h-full bg-[#ecfdf5] relative overflow-hidden pb-0">
+            <div className="islamic-pattern absolute inset-0 z-0 pointer-events-none opacity-5"></div>
 
-      {/* Chat Header */}
-      <div className="bg-white/90 backdrop-blur-md px-4 py-3 border-b border-emerald-100 relative z-10 shadow-sm flex items-center justify-between">
-         <div className="flex items-center gap-3">
-            <div className="relative">
-                <div className="bg-gradient-to-tr from-teal-500 to-emerald-600 w-10 h-10 rounded-full flex items-center justify-center text-white shadow-md border-2 border-white">
-                    <Sparkles size={20} />
+            {/* Header */}
+            <div className="bg-white/90 backdrop-blur-md px-4 py-3 border-b border-emerald-100 relative z-10 shadow-sm flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="relative">
+                        <div className="bg-gradient-to-tr from-teal-500 to-emerald-600 w-10 h-10 rounded-full flex items-center justify-center text-white shadow-md border-2 border-white">
+                            <Sparkles size={20} />
+                        </div>
+                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full animate-pulse"></div>
+                    </div>
+                    <div>
+                        <h2 className="text-base font-bold font-cinzel text-teal-900 leading-tight">
+                            Manevi Asistan
+                        </h2>
+                        <p className="text-teal-600 text-[10px] font-medium">Yapay Zeka Destekli</p>
+                    </div>
                 </div>
-                <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
-            </div>
-            <div>
-                <h2 className="text-base font-bold font-cinzel text-teal-900 leading-tight">
-                    Manevi Asistan
-                </h2>
-                <p className="text-teal-600 text-[10px] font-medium animate-pulse">Çevrimiçi</p>
-            </div>
-         </div>
-         <div className="flex gap-2">
-            {!isPremium && (
-                <button onClick={onOpenPremium} className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-1.5 rounded-full border border-amber-200 shadow-sm flex items-center gap-1">
-                    <Fingerprint size={10} /> PRO
+                <button onClick={onClose} className="bg-stone-100 p-2 rounded-full text-stone-500 hover:bg-stone-200">
+                    <ArrowRight size={18} />
                 </button>
-            )}
-            <button onClick={onClose} className="bg-stone-100 p-2 rounded-full text-stone-500 hover:bg-stone-200">
-                <ArrowRight size={16} />
-            </button>
-         </div>
-      </div>
+            </div>
 
-      {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto p-4 z-10 space-y-4">
-        {messages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                {msg.sender === 'ai' && (
-                    <div className="w-8 h-8 rounded-full bg-teal-100 flex items-center justify-center text-teal-700 shrink-0 mr-2 mt-auto border border-teal-200">
-                        <Sparkles size={14} />
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-4 z-10 space-y-4 pb-24">
+                {messages.map((msg) => (
+                    <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        {msg.sender === 'ai' && (
+                            <div className="w-8 h-8 rounded-full bg-teal-100 flex items-center justify-center text-teal-700 shrink-0 mr-2 mt-auto border border-teal-200">
+                                <Sparkles size={14} />
+                            </div>
+                        )}
+
+                        <div className={`max-w-[85%] ${msg.type === 'plan' ? 'w-full' : ''}`}>
+                            {/* Text Message */}
+                            {msg.type === 'text' && (
+                                <div className={`p-4 rounded-2xl shadow-sm whitespace-pre-wrap leading-relaxed text-[15px] font-serif ${msg.sender === 'user'
+                                    ? 'bg-teal-600 text-white rounded-br-none'
+                                    : 'bg-white text-stone-800 border border-stone-100 rounded-bl-none'
+                                    }`}>
+                                    {msg.text}
+                                </div>
+                            )}
+
+                            {/* Plan Card */}
+                            {msg.type === 'plan' && msg.planData && (
+                                <div className="bg-white rounded-2xl shadow-lg border border-amber-100 overflow-hidden mt-2 animate-in fade-in slide-in-from-bottom-4">
+                                    <div className="bg-amber-50 p-4 border-b border-amber-100">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <h3 className="text-lg font-bold text-amber-900 font-serif">{msg.planData.title}</h3>
+                                            <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider">Özel Reçete</span>
+                                        </div>
+                                        <p className="text-sm text-amber-800/80 italic">{msg.planData.description}</p>
+                                    </div>
+
+                                    <div className="p-4 space-y-4">
+                                        {msg.planData.days.map((day) => (
+                                            <div key={day.day} className="bg-stone-50 rounded-xl p-3 border border-stone-100">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <span className="text-xs font-bold text-stone-500">Gün {day.day}</span>
+                                                    <span className="text-xs font-bold text-teal-600 uppercase">{day.focus}</span>
+                                                </div>
+                                                <div className="grid grid-cols-1 gap-2 text-sm">
+                                                    <div className="flex gap-2">
+                                                        <Sun size={14} className="text-amber-500 mt-0.5 shrink-0" />
+                                                        <span className="text-stone-700">{day.morning}</span>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <Moon size={14} className="text-indigo-500 mt-0.5 shrink-0" />
+                                                        <span className="text-stone-700">{day.evening}</span>
+                                                    </div>
+                                                </div>
+                                                <div className="mt-2 text-center bg-white p-2 rounded border border-stone-100">
+                                                    <p className="text-xs font-bold text-teal-700">"{day.dhikr}"</p>
+                                                </div>
+                                            </div>
+                                        ))}
+
+                                        <button
+                                            onClick={() => msg.planData && handleSavePlan(msg.planData, msg.id)}
+                                            disabled={savingPlanId === msg.id}
+                                            className="w-full py-3 bg-stone-900 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-stone-800 transition-colors disabled:opacity-70"
+                                        >
+                                            {savingPlanId === msg.id ? (
+                                                <span className="animate-spin">⌛</span>
+                                            ) : (
+                                                <Save size={16} />
+                                            )}
+                                            Reçeteyi Kaydet
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                ))}
+                {isTyping && (
+                    <div className="flex items-center gap-1 ml-10">
+                        <span className="w-2 h-2 bg-teal-400 rounded-full animate-bounce"></span>
+                        <span className="w-2 h-2 bg-teal-400 rounded-full animate-bounce [animation-delay:0.2s]"></span>
+                        <span className="w-2 h-2 bg-teal-400 rounded-full animate-bounce [animation-delay:0.4s]"></span>
                     </div>
                 )}
-                
-                <div className={`max-w-[90%] rounded-2xl p-4 shadow-sm relative ${
-                    msg.sender === 'user' 
-                    ? 'bg-teal-600 text-white rounded-br-none' 
-                    : 'bg-white text-stone-800 border border-stone-100 rounded-bl-none'
-                }`}>
-                    {msg.type === 'text' && (
-                        <p className="text-base font-serif leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-                    )}
-
-                    {msg.type === 'typing' && (
-                        <div className="flex gap-1 h-4 items-center">
-                            <span className="w-2 h-2 bg-teal-400 rounded-full animate-bounce"></span>
-                            <span className="w-2 h-2 bg-teal-400 rounded-full animate-bounce [animation-delay:0.2s]"></span>
-                            <span className="w-2 h-2 bg-teal-400 rounded-full animate-bounce [animation-delay:0.4s]"></span>
-                        </div>
-                    )}
-
-                    {msg.type === 'plan' && msg.planData && (
-                        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
-                            <div>
-                                <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold uppercase tracking-wider">Sana Özel</span>
-                                <h3 className="text-xl font-bold font-serif text-teal-800 mt-1">{msg.planData.title}</h3>
-                                <p className="text-sm text-stone-500 italic mt-1 leading-relaxed">"{msg.planData.description}"</p>
-                            </div>
-                            
-                            <div className="space-y-3">
-                                {Array.isArray(msg.planData.days) && msg.planData.days.map((day) => (
-                                    <div key={day.day} className="bg-stone-50 rounded-xl p-4 border border-stone-200">
-                                        <div className="flex items-center justify-between mb-3">
-                                            <span className="text-sm font-bold text-stone-500 bg-white px-3 py-1 rounded-full border border-stone-100">{day.day}. Gün</span>
-                                            <span className="text-sm font-bold text-teal-700 uppercase tracking-wide">{day.focus}</span>
-                                        </div>
-                                        <div className="grid grid-cols-1 gap-3 mb-3">
-                                            <div className="bg-white p-3 rounded-lg border border-stone-100">
-                                                <div className="flex items-center gap-2 text-xs text-amber-600 font-bold mb-1.5"><Sun size={12}/> Sabah</div>
-                                                <p className="text-sm text-stone-700 leading-normal">{day.morning}</p>
-                                            </div>
-                                            <div className="bg-white p-3 rounded-lg border border-stone-100">
-                                                <div className="flex items-center gap-2 text-xs text-indigo-600 font-bold mb-1.5"><Moon size={12}/> Akşam</div>
-                                                <p className="text-sm text-stone-700 leading-normal">{day.evening}</p>
-                                            </div>
-                                        </div>
-                                        <div className="bg-teal-50 p-3 rounded-lg border border-teal-100 text-center">
-                                            <p className="text-xs text-teal-600 font-bold mb-1">Günün Zikri</p>
-                                            <p className="text-sm text-teal-900 font-serif italic">"{day.dhikr}"</p>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-
-                            <button 
-                                onClick={() => {
-                                    alert("Program kaydedildi. Allah kabul etsin.");
-                                    onClose();
-                                }}
-                                className="w-full py-4 bg-stone-900 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-stone-800 transition-colors"
-                            >
-                                <CheckCircle2 size={18} /> Kabul Et ve Uygula
-                            </button>
-                            <button 
-                                onClick={handleRestart}
-                                className="w-full text-stone-400 text-xs hover:text-stone-600 underline"
-                            >
-                                Yeni Bir Durum Paylaş
-                            </button>
-                        </div>
-                    )}
-                </div>
+                <div ref={messagesEndRef} />
             </div>
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
 
-      {/* Input Area (Chips or Text) */}
-      {inputVisible && !showTextInput && (
-          <div className="p-4 bg-white/80 backdrop-blur-md border-t border-emerald-100 z-20 animate-in slide-in-from-bottom-4">
-              <p className="text-xs text-stone-500 font-bold mb-3 px-1">Hissiyatını seç ({!isPremium ? '1 Reklam' : 'Ücretsiz'}):</p>
-              <div className="flex flex-wrap gap-2">
-                  {MOODS.map(mood => (
-                      <button
-                        key={mood.id}
-                        onClick={() => initiateMoodProcessing(mood.label)}
-                        className={`px-4 py-2 rounded-full border flex items-center gap-2 transition-all active:scale-95 ${mood.color} bg-opacity-10 border-transparent hover:bg-opacity-20`}
-                      >
-                          <mood.icon size={16} />
-                          <span className="text-xs font-bold text-stone-700">{mood.label}</span>
-                      </button>
-                  ))}
-                  <button 
-                    onClick={() => setShowTextInput(true)}
-                    className="px-4 py-2 rounded-full border border-stone-200 bg-stone-50 text-stone-500 text-xs font-bold flex items-center gap-2 hover:bg-stone-100 active:scale-95"
-                  >
-                      Diğer / Kendim Yazayım...
-                  </button>
-              </div>
-          </div>
-      )}
+            {/* Input Area */}
+            <div className="absolute bottom-0 left-0 right-0 bg-white p-4 border-t border-stone-100 z-20">
+                <form onSubmit={handleSend} className="flex gap-2 items-center">
+                    <input
+                        type="text"
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                        placeholder="Derdini yaz, derman arayalım..."
+                        className="flex-1 bg-stone-50 border border-stone-200 rounded-full px-5 py-3.5 text-base focus:outline-none focus:border-teal-500 font-serif placeholder:text-stone-400"
+                    />
+                    <button
+                        type="submit"
+                        disabled={!inputText.trim() || isTyping}
+                        className="p-3.5 bg-teal-600 text-white rounded-full hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-teal-200"
+                    >
+                        <Send size={20} />
+                    </button>
+                </form>
+            </div>
 
-      {inputVisible && showTextInput && (
-          <div className="p-4 bg-white/90 backdrop-blur-md border-t border-emerald-100 z-20 animate-in slide-in-from-bottom-4">
-              <form onSubmit={handleCustomSubmit} className="flex gap-2 items-center">
-                  <button 
-                    type="button" 
-                    onClick={() => setShowTextInput(false)}
-                    className="p-3 bg-stone-100 rounded-full text-stone-400 hover:text-stone-600"
-                  >
-                      <X size={18} />
-                  </button>
-                  <input 
-                    type="text" 
-                    value={customInput}
-                    onChange={(e) => setCustomInput(e.target.value)}
-                    placeholder="Sıkıntını veya durumunu kısaca yaz..."
-                    className="flex-1 bg-stone-50 border border-stone-200 rounded-full px-4 py-3 text-sm focus:outline-none focus:border-teal-500 font-serif"
-                    autoFocus
-                  />
-                  <button 
-                    type="submit"
-                    disabled={!customInput.trim()}
-                    className="p-3 bg-teal-600 text-white rounded-full hover:bg-teal-700 disabled:bg-stone-300 disabled:cursor-not-allowed transition-colors"
-                  >
-                      <Send size={18} />
-                  </button>
-              </form>
-          </div>
-      )}
-    </div>
-  );
+        </div>
+    );
 };
 
 export default PrayerCoach;

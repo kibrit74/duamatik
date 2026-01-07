@@ -12,22 +12,23 @@
 import { seedCatalogPrayers, seedQuotes, checkTablesExist } from './supabase';
 import { defaultPrayers } from '../data/defaults';
 import { quotes } from '../data/quotes';
+import { logger } from '../utils/logger';
 
 export async function runSeed(): Promise<void> {
-    console.log('🌱 Starting database seed...');
+    logger.log('🌱 Starting database seed...');
 
     // Check if tables exist
     const tables = await checkTablesExist();
-    console.log('📋 Tables status:', tables);
+    logger.log('📋 Tables status:', tables);
 
     if (!tables.prayers) {
-        console.error('❌ prayers table does not exist! Please create it first.');
-        console.log('Run the SQL schema in Supabase Dashboard → SQL Editor');
+        logger.error('❌ prayers table does not exist! Please create it first.');
+        logger.log('Run the SQL schema in Supabase Dashboard → SQL Editor');
         return;
     }
 
     // Seed prayers
-    console.log('📿 Seeding prayers...');
+    logger.log('📿 Seeding prayers...');
     const prayersToSeed = defaultPrayers.map(p => ({
         title: p.title,
         arabic: p.arabic,
@@ -39,33 +40,33 @@ export async function runSeed(): Promise<void> {
 
     const prayersSuccess = await seedCatalogPrayers(prayersToSeed);
     if (prayersSuccess) {
-        console.log(`✅ Prayers seeded successfully (${prayersToSeed.length} items)`);
+        logger.log(`✅ Prayers seeded successfully (${prayersToSeed.length} items)`);
     } else {
-        console.error('❌ Failed to seed prayers');
+        logger.error('❌ Failed to seed prayers');
     }
 
     // Seed quotes
     if (tables.quotes) {
-        console.log('💬 Seeding quotes...');
+        logger.log('💬 Seeding quotes...');
         const quotesSuccess = await seedQuotes(quotes);
         if (quotesSuccess) {
-            console.log(`✅ Quotes seeded successfully (${quotes.length} items)`);
+            logger.log(`✅ Quotes seeded successfully (${quotes.length} items)`);
         } else {
-            console.error('❌ Failed to seed quotes');
+            logger.error('❌ Failed to seed quotes');
         }
     } else {
-        console.warn('⚠️ quotes table does not exist, skipping quotes seed');
+        logger.warn('⚠️ quotes table does not exist, skipping quotes seed');
     }
 
-    console.log('🎉 Seed complete!');
+    logger.log('🎉 Seed complete!');
 }
 
 // Check database status
 export async function checkStatus(): Promise<void> {
     const tables = await checkTablesExist();
-    console.log('📋 Database Tables Status:');
-    console.log('  - prayers:', tables.prayers ? '✅' : '❌');
-    console.log('  - user_prayers:', tables.userPrayers ? '✅' : '❌');
-    console.log('  - custom_prayers:', tables.customPrayers ? '✅' : '❌');
-    console.log('  - quotes:', tables.quotes ? '✅' : '❌');
+    logger.log('📋 Database Tables Status:');
+    logger.log('  - prayers:', tables.prayers ? '✅' : '❌');
+    logger.log('  - user_prayers:', tables.userPrayers ? '✅' : '❌');
+    logger.log('  - custom_prayers:', tables.customPrayers ? '✅' : '❌');
+    logger.log('  - quotes:', tables.quotes ? '✅' : '❌');
 }

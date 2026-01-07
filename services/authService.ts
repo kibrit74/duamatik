@@ -1,5 +1,6 @@
 import { supabase, getProfile } from './supabase';
 import { User } from '../types';
+import { logger } from '../utils/logger';
 
 class AuthService {
   private currentUser: User | null = null;
@@ -7,19 +8,15 @@ class AuthService {
   private initialized = false;
 
   constructor() {
-    // Don't call async functions in constructor
-    console.log('🔐 AuthService initialized');
+    logger.log('🔐 AuthService initialized');
   }
 
   async init() {
     if (this.initialized) return;
     this.initialized = true;
 
-    console.log('🔐 AuthService.init() called');
-
     // Set up auth state change listener
     supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('🔐 Auth state changed:', event);
       if (session?.user) {
         // IMMEDIATE UPDATE: Use session data first to unblock UI
         const minimalUser: User = {
@@ -35,19 +32,16 @@ class AuthService {
         this.currentUser = minimalUser;
         this.authStateListeners.forEach(listener => listener(this.currentUser));
 
-        // Background fetch for strict profile data (role, premium status)
+        // Background fetch for profile (role, premium status)
         try {
-          // Add a small delay to let the initial render happen
           await new Promise(resolve => setTimeout(resolve, 100));
-
           const profile = await getProfile(session.user.id);
           if (profile) {
-            console.log('🔐 Background profile update success');
             this.currentUser = profile;
             this.authStateListeners.forEach(listener => listener(this.currentUser));
           }
         } catch (e) {
-          console.warn('🔐 Background profile update failed:', e);
+          logger.warn('Background profile update failed:', e);
         }
       } else {
         this.currentUser = null;
@@ -59,7 +53,6 @@ class AuthService {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
-        console.log('🔐 Existing session found');
         const profile = await getProfile(session.user.id);
         if (profile) {
           this.currentUser = profile;
@@ -67,25 +60,13 @@ class AuthService {
         }
       }
     } catch (e) {
-      console.warn('🔐 Failed to get initial session:', e);
+      logger.warn('Failed to get initial session:', e);
     }
   }
 
   async login(email: string, password: string): Promise<User> {
-    console.log('🔐 Login attempt:', email);
-
     try {
-      console.log('🔐 Calling signInWithPassword...');
-      // Add a small timeout race to detect hangs
-      const signInPromise = supabase.auth.signInWithPassword({ email, password });
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Login timed out')), 15000));
-
-      const response = await Promise.race([signInPromise, timeoutPromise]) as any;
-      console.log('🔐 signInWithPassword returned:', response);
-
-      const { data, error } = response;
-
-      console.log('🔐 Supabase auth result:', { user: !!data?.user, error: error?.message });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
       if (error) {
         if (error.message.includes('Invalid login credentials')) {
@@ -98,41 +79,26 @@ class AuthService {
         throw new Error('Giriş yapılamadı.');
       }
 
-      // Try to get profile
-      let profile: User | null = null;
-      try {
-        console.log('🔐 Fetching profile...');
-        profile = await getProfile(data.user.id);
-        console.log('🔐 Profile result:', profile ? 'Found' : 'Not Found');
-      } catch (e) {
-        console.warn('🔐 Profile fetch failed:', e);
-      }
+      // Create minimal user for fast UI
+      const minimalUser: User = {
+        id: data.user.id,
+        email: data.user.email || email,
+        name: data.user.user_metadata?.name || 'Kullanıcı',
+        role: 'user',
+        city: data.user.user_metadata?.city,
+        joinDate: new Date().toISOString(),
+        isPremium: false,
+      };
 
-      // If no profile, create minimal user
-      if (!profile) {
-        console.log('🔐 Creating minimal user from auth data');
-        profile = {
-          id: data.user.id,
-          email: data.user.email || email,
-          name: data.user.user_metadata?.name || 'Kullanıcı',
-          role: 'user',
-          city: data.user.user_metadata?.city,
-          joinDate: new Date().toISOString(),
-          isPremium: false,
-        };
-      }
-
-      this.currentUser = profile;
-      return profile;
+      this.currentUser = minimalUser;
+      return minimalUser;
     } catch (e: any) {
-      console.error('🔐 Login error:', e);
+      logger.error('Login error:', e);
       throw e;
     }
   }
 
   async register(name: string, email: string, city: string, password: string): Promise<User> {
-    console.log('📝 Register attempt:', email);
-
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -140,8 +106,6 @@ class AuthService {
         data: { name, city },
       },
     });
-
-    console.log('📝 Supabase signup result:', { user: !!data?.user, error: error?.message });
 
     if (error) {
       if (error.message.includes('already registered')) {
@@ -163,7 +127,6 @@ class AuthService {
     let profile = await getProfile(data.user.id);
 
     if (!profile) {
-      // Create manually
       try {
         await supabase.from('profiles').insert({
           id: data.user.id,
@@ -172,7 +135,7 @@ class AuthService {
           city,
         });
       } catch (e) {
-        console.warn('Profile insert failed:', e);
+        logger.warn('Profile insert failed:', e);
       }
 
       profile = {
@@ -191,9 +154,26 @@ class AuthService {
   }
 
   async logout(): Promise<void> {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      logger.error('Logout error:', e);
+    }
+
     this.currentUser = null;
     localStorage.removeItem('currentUser');
+
+    // Clear all Supabase localStorage keys
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('sb-')) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+
+    this.authStateListeners.forEach(listener => listener(null));
   }
 
   getCurrentUser(): User | null {

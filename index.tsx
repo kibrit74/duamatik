@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App';
+import AdminApp from './AdminApp';
+import MobileApp from './App';
 import { runSeed, checkStatus } from './services/seedData';
 
 // Expose seed functions to window for console access
@@ -12,9 +13,12 @@ if (!rootElement) {
   throw new Error("Could not find root element to mount to");
 }
 
+// Route-based app selection - Admin and Mobile are completely separate
+const isAdminRoute = window.location.pathname === '/admin';
+
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    {isAdminRoute ? <AdminApp /> : <MobileApp />}
   </React.StrictMode>
 );

@@ -2,7 +2,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Prayer, User } from '../types';
 import { generatePrayerAudio } from '../services/geminiService';
+import { getCachedAudio, saveCachedAudio, getAdRates } from '../services/supabase';
 import { dbService } from '../services/db';
+import { logger } from '../utils/logger';
 import RewardAdModal from './RewardAdModal';
 import HistoryModal from './HistoryModal';
 import { ChevronLeft, ChevronRight, RotateCcw, Check, Settings2, Play, Pause, Type, Minus, Plus, History, Volume2, Smartphone, X, DownloadCloud, Loader2, Trash2, Headphones, MessageCircle, CheckCircle2, Crown } from 'lucide-react';
@@ -12,7 +14,7 @@ interface CounterProps {
   onUpdate: (prayer: Prayer) => void;
   onBack: () => void;
   user: User | null;
-  onOpenPremium: () => void;
+  onOpenPremium?: () => void; // Optional if not always passed
 }
 
 // Virtual Tasbih Beads Component
@@ -32,7 +34,7 @@ const BeadString: React.FC<{ count: number }> = ({ count }) => {
         ))}
       </div>
       {/* String Line */}
-      <div className="absolute top-1/2 left-0 w-full h-0.5 bg-emerald-200 -z-10 -translate-y-1/2"></div>
+      <div className="absolute top-1/2 left-0 w-full h-0.5 bg-emerald-200/50 -z-10 -translate-y-1/2"></div>
     </div>
   );
 };
@@ -81,6 +83,16 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
   const [showHistory, setShowHistory] = useState(false);
   const [isPocketMode, setIsPocketMode] = useState(false);
   const [showAdModal, setShowAdModal] = useState(false);
+  const [ttsAdRate, setTtsAdRate] = useState(2);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(() => {
+    const saved = localStorage.getItem('audioPlaybackSpeed');
+    return saved ? parseFloat(saved) : 1.0;
+  });
+
+  // Load TTS ad rate on mount
+  useEffect(() => {
+    getAdRates().then(rates => setTtsAdRate(rates.tts || 2));
+  }, []);
 
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
@@ -153,6 +165,10 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
         return;
       }
 
+      // Bekleme süresini hıza göre ayarla (hızlı = kısa bekleme)
+      const baseDelay = 800;
+      const adjustedDelay = Math.round(baseDelay / playbackSpeed);
+
       if (prayer.audioBase64) {
         try {
           await playAudioWithCallback(() => {
@@ -160,7 +176,7 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
               handleIncrement(false);
               autoLoopTimeoutRef.current = window.setTimeout(() => {
                 runAutoLoop();
-              }, 800);
+              }, adjustedDelay);
             }
           });
         } catch (e) {
@@ -169,9 +185,11 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
         }
       } else {
         handleIncrement(false);
+        // Ses yoksa daha uzun bekleme (hıza göre ayarlanmış)
+        const noAudioDelay = Math.round(2000 / playbackSpeed);
         autoLoopTimeoutRef.current = window.setTimeout(() => {
           runAutoLoop();
-        }, 2000);
+        }, noAudioDelay);
       }
     };
 
@@ -191,7 +209,7 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAutoCounting, prayer.audioBase64]);
+  }, [isAutoCounting, prayer.audioBase64, playbackSpeed]);
 
   useEffect(() => {
     return () => {
@@ -236,10 +254,9 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
 
     try {
       if (audioSourceRef.current) {
-        try { audioSourceRef.current.stop(); } catch (e) { }
+        try { audioSourceRef.current.stop(); } catch (e) { logger.warn('Audio stop error', e); }
+        audioSourceRef.current = null;
       }
-
-      setIsSpeaking(true);
       if (!audioContextRef.current) {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       }
@@ -258,6 +275,7 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
 
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
+      source.playbackRate.value = playbackSpeed; // Hız ayarı
       source.connect(ctx.destination);
 
       source.onended = () => {
@@ -300,9 +318,25 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
 
     try {
       const textToSpeak = prayer.turkish;
-      const audioBase64 = await generatePrayerAudio(textToSpeak);
 
-      // Try to upload to Supabase Storage
+      // Önce cache'e bak - başkası zaten bu sesi üretmiş olabilir
+      const cachedAudio = await getCachedAudio(textToSpeak);
+
+      let audioBase64: string;
+
+      if (cachedAudio) {
+        // Cache'den al - API maliyeti yok! 🎉
+        audioBase64 = cachedAudio;
+        console.log('🎯 Audio found in cache - no API cost!');
+      } else {
+        // Cache'de yok, yeni üret
+        audioBase64 = await generatePrayerAudio(textToSpeak);
+
+        // Başarılı üretildiyse cache'e kaydet (arka planda)
+        saveCachedAudio(textToSpeak, audioBase64, user?.id).catch(() => { });
+      }
+
+      // Kullanıcının kendi dua kaydına da ekle
       let audioUrl: string | undefined;
       try {
         const uploaded = await dbService.uploadAudio(prayer.id, audioBase64);
@@ -322,7 +356,18 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
 
     } catch (error: any) {
       console.error(error);
-      alert("Ses oluşturulamadı: " + error.message);
+
+      // Kullanıcıya tarayıcı sesini kullanma seçeneği sun
+      const useBrowserTTS = window.confirm(
+        error.message + "\n\nTarayıcının yerleşik sesini şimdi dinlemek ister misiniz?"
+      );
+
+      if (useBrowserTTS && 'speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(prayer.turkish);
+        utterance.lang = 'tr-TR';
+        utterance.rate = 0.9;
+        window.speechSynthesis.speak(utterance);
+      }
     } finally {
       setIsGeneratingAudio(false);
     }
@@ -428,17 +473,18 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
 
       {showAdModal && (
         <RewardAdModal
-          cost={2}
+          cost={ttsAdRate}
           title="Ses Dosyası Oluştur"
-          description="Yapay zeka ile doğal ve akıcı bir seslendirme oluşturmak yüksek işlem gücü gerektirir. Devam etmek için lütfen 2 adet reklam izleyin."
+          description={`Yapay zeka ile doğal ve akıcı bir seslendirme oluşturmak yüksek işlem gücü gerektirir. Devam etmek için lütfen ${ttsAdRate} adet reklam izleyin.`}
           onComplete={handleAdComplete}
           onCancel={() => setShowAdModal(false)}
+          onOpenPremium={onOpenPremium}
         />
       )}
 
       {isPocketMode && (
         <div
-          className="fixed inset-0 z-[100] bg-black cursor-pointer flex flex-col justify-between p-6 touch-manipulation pb-10"
+          className="absolute inset-0 z-[100] bg-black cursor-pointer flex flex-col justify-between p-6 touch-manipulation pb-safe shadow-[inset_0_0_100px_rgba(45,212,191,0.6)] border-4 border-teal-400/50"
           onClick={() => handleIncrement(true)}
         >
           {/* ... Pocket Mode Content ... */}
@@ -540,6 +586,28 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
                 <button onClick={() => setFontFamily('serif')} className={`px-3 py-1 rounded text-xs border ${fontFamily === 'serif' ? 'bg-teal-50 border-teal-500 text-teal-700' : 'border-stone-200'}`}>Klasik</button>
                 <button onClick={() => setFontFamily('amiri')} className={`px-3 py-1 rounded text-xs border font-amiri ${fontFamily === 'amiri' ? 'bg-teal-50 border-teal-500 text-teal-700' : 'border-stone-200'}`}>Hat</button>
                 <button onClick={() => setFontFamily('sans')} className={`px-3 py-1 rounded text-xs border font-sans ${fontFamily === 'sans' ? 'bg-teal-50 border-teal-500 text-teal-700' : 'border-stone-200'}`}>Modern</button>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-stone-600 flex items-center gap-2">
+                <Volume2 size={16} className="text-teal-600" />
+                Ses Hızı
+              </span>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min="0.5"
+                  max="2"
+                  step="0.1"
+                  value={playbackSpeed}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    setPlaybackSpeed(val);
+                    localStorage.setItem('audioPlaybackSpeed', String(val));
+                  }}
+                  className="w-24 accent-teal-600"
+                />
+                <span className="text-sm font-mono w-12 text-right">{playbackSpeed.toFixed(1)}x</span>
               </div>
             </div>
           </div>

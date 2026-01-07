@@ -51,6 +51,7 @@ export interface SearchResult {
 }
 
 export interface Quote {
+  id?: string;
   text: string;
   source: string;
 }
@@ -98,6 +99,10 @@ export interface User {
   avatar?: string;
   joinDate: string;
   isPremium: boolean; // Monetization flag
+  stats?: {
+    totalZikir: number;
+    totalPrayers: number;
+  };
 }
 
 // Spiritual Coach Types
@@ -126,6 +131,33 @@ export interface Notification {
   metadata?: any;
   isRead: boolean;
   createdAt: string;
+}
+
+export interface AdminNotification {
+  id: string;
+  title: string;
+  message: string;
+  target: string;
+  created_at: string;
+  created_by?: string;
+}
+
+// Package Types
+export interface PrayerPackage {
+  id: string;
+  title: string;
+  description: string;
+  iconUrl?: string;
+  isPremium: boolean;
+  prayers?: Prayer[]; // Hydrated
+  itemCount?: number;
+}
+
+export interface PackageItem {
+  id: string;
+  packageId: string;
+  prayerId: string;
+  displayOrder: number;
 }
 
 export interface Message {
