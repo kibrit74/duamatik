@@ -98,7 +98,7 @@ const Profile: React.FC<ProfileProps> = ({ prayers, onOpenPrayer, quote, user, o
       <div className="islamic-pattern fixed inset-0 z-0 pointer-events-none opacity-10"></div>
 
       {/* Top Section */}
-      <div className="bg-gradient-to-b from-white/80 to-[#ecfdf5]/90 backdrop-blur-sm pt-12 pb-8 px-6 border-b border-emerald-100 relative z-10 flex flex-col items-center text-center shadow-sm">
+      <div className="bg-linear-to-b from-white/80 to-[#ecfdf5]/90 backdrop-blur-sm pt-12 pb-8 px-6 border-b border-emerald-100 relative z-10 flex flex-col items-center text-center shadow-sm">
         <Logo size={100} className="mb-4" />
         <h1 className="text-2xl font-bold font-cinzel text-teal-900">Profilim</h1>
         <p className="text-stone-500 font-serif italic text-sm mt-1 max-w-[250px]">
@@ -242,7 +242,7 @@ const Profile: React.FC<ProfileProps> = ({ prayers, onOpenPrayer, quote, user, o
               <div
                 key={prayer.id}
                 onClick={() => onOpenPrayer(prayer)}
-                className="bg-gradient-to-r from-purple-50 to-white p-3 rounded-xl border border-purple-100 flex items-center justify-between cursor-pointer hover:border-purple-200 transition-colors"
+                className="bg-linear-to-r from-purple-50 to-white p-3 rounded-xl border border-purple-100 flex items-center justify-between cursor-pointer hover:border-purple-200 transition-colors"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600">
@@ -296,7 +296,7 @@ const Profile: React.FC<ProfileProps> = ({ prayers, onOpenPrayer, quote, user, o
                 <div className="flex items-center gap-2 mt-2">
                   <div className="h-1.5 flex-1 bg-stone-100 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-gradient-to-r from-teal-500 to-emerald-400 rounded-full transition-all duration-500"
+                      className="h-full bg-linear-to-r from-teal-500 to-emerald-400 rounded-full transition-all duration-500"
                       style={{ width: `${prayer.targetCount > 0 ? Math.min((prayer.currentCount / prayer.targetCount) * 100, 100) : 50}%` }}
                     />
                   </div>

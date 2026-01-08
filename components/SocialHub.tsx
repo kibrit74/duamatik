@@ -206,7 +206,7 @@ const SocialHub: React.FC<SocialHubProps> = ({ onClose, user }) => {
   const renderLeaderboard = () => (
     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
       {/* Top Stats */}
-      <div className="bg-gradient-to-r from-teal-600 to-emerald-600 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
+      <div className="bg-linear-to-r from-teal-600 to-emerald-600 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-10 -mt-10 blur-2xl"></div>
         <div className="relative z-10 flex justify-between items-end">
           <div>

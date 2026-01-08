@@ -522,7 +522,7 @@ export const generatePrayerAudio = async (text: string): Promise<string> => {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const response = await aiInstance.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-2.5-flash-preview-tts",
         contents: [{ parts: [{ text: cleanText }] }],
         config: {
           responseModalities: [Modality.AUDIO],

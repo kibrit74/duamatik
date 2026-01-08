@@ -59,7 +59,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ onLogin, onBack }) => {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 flex flex-col items-center justify-center p-6 relative overflow-hidden">
+        <div className="min-h-screen bg-linear-to-br from-stone-900 via-stone-800 to-stone-900 flex flex-col items-center justify-center p-6 relative overflow-hidden">
             {/* Background Pattern */}
             <div className="absolute inset-0 opacity-10">
                 <div className="absolute top-0 left-0 w-72 h-72 bg-red-500 rounded-full blur-[100px]"></div>
@@ -77,7 +77,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ onLogin, onBack }) => {
             <div className="relative z-10 w-full max-w-sm">
                 {/* Header */}
                 <div className="text-center mb-8">
-                    <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-red-600 to-orange-600 rounded-2xl shadow-lg shadow-red-500/30 mb-4">
+                    <div className="inline-flex items-center justify-center w-16 h-16 bg-linear-to-br from-red-600 to-orange-600 rounded-2xl shadow-lg shadow-red-500/30 mb-4">
                         <ShieldCheck className="text-white" size={32} />
                     </div>
                     <h1 className="text-2xl font-bold text-white font-cinzel">Yönetici Girişi</h1>
@@ -123,8 +123,8 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ onLogin, onBack }) => {
                         type="submit"
                         disabled={loading}
                         className={`w-full mt-6 py-3.5 rounded-xl font-bold text-white transition-all flex items-center justify-center gap-2 ${loading
-                                ? 'bg-stone-700 cursor-not-allowed'
-                                : 'bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500 shadow-lg shadow-orange-500/20 active:scale-[0.98]'
+                            ? 'bg-stone-700 cursor-not-allowed'
+                            : 'bg-linear-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500 shadow-lg shadow-orange-500/20 active:scale-[0.98]'
                             }`}
                     >
                         {loading ? (

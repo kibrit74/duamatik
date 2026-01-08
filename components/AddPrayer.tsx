@@ -11,7 +11,8 @@ interface AddPrayerProps {
   onSave: (prayer: Prayer) => void;
   onCancel: () => void;
   initialData?: Partial<Prayer> | null;
-  onOpenPremium?: () => void; // PRO üzelik seçeneği için
+  onOpenPremium?: () => void;
+  hideHeader?: boolean;
 }
 
 const CATEGORIES = [
@@ -21,7 +22,7 @@ const CATEGORIES = [
   "Aile", "Yolculuk", "Diğer"
 ];
 
-const AddPrayer: React.FC<AddPrayerProps> = ({ onSave, onCancel, initialData, onOpenPremium }) => {
+const AddPrayer: React.FC<AddPrayerProps> = ({ onSave, onCancel, initialData, onOpenPremium, hideHeader }) => {
   const [title, setTitle] = useState('');
   const [text, setText] = useState('');
   const [meaning, setMeaning] = useState(''); // New State for Meaning
@@ -214,13 +215,15 @@ const AddPrayer: React.FC<AddPrayerProps> = ({ onSave, onCancel, initialData, on
       )}
 
       {/* Header */}
-      <div className="bg-white/90 backdrop-blur-md px-4 py-4 border-b border-emerald-100 flex items-center justify-between sticky top-0 z-30 shadow-sm">
-        <button onClick={onCancel} className="text-stone-500 hover:text-stone-800 p-1">
-          <X size={24} />
-        </button>
-        <h2 className="font-cinzel font-bold text-lg text-teal-900">Yeni Dua Ekle</h2>
-        <div className="w-6"></div>
-      </div>
+      {!hideHeader && (
+        <div className="bg-white/90 backdrop-blur-md px-4 py-4 border-b border-emerald-100 flex items-center justify-between sticky top-0 z-30 shadow-sm">
+          <button onClick={onCancel} className="text-stone-500 hover:text-stone-800 p-1">
+            <X size={24} />
+          </button>
+          <h2 className="font-cinzel font-bold text-lg text-teal-900">Yeni Dua Ekle</h2>
+          <div className="w-6"></div>
+        </div>
+      )}
 
       {/* Content Area */}
       <div className="p-5 relative z-10">
@@ -374,7 +377,7 @@ const AddPrayer: React.FC<AddPrayerProps> = ({ onSave, onCancel, initialData, on
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-4 bg-gradient-to-r from-teal-700 to-teal-800 text-amber-50 rounded-xl font-cinzel font-bold tracking-widest shadow-lg shadow-teal-900/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 border border-teal-600 disabled:opacity-50"
+            className="w-full py-4 bg-linear-to-r from-teal-700 to-teal-800 text-amber-50 rounded-xl font-cinzel font-bold tracking-widest shadow-lg shadow-teal-900/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 border border-teal-600 disabled:opacity-50"
           >
             <Save size={20} />
             {loading ? 'ANALİZ EDİLİYOR...' : 'KAYDET'}

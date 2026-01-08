@@ -28,7 +28,7 @@ const BeadString: React.FC<{ count: number }> = ({ count }) => {
         {Array.from({ length: Math.max(count + 10, 33) }).map((_, i) => (
           <div
             key={i}
-            className={`flex-shrink-0 w-8 h-8 rounded-full shadow-inner border border-emerald-200/60 ${i < count ? 'bg-teal-700' : 'bg-[#e0f2fe]'
+            className={`shrink-0 w-8 h-8 rounded-full shadow-inner border border-emerald-200/60 ${i < count ? 'bg-teal-700' : 'bg-[#e0f2fe]'
               }`}
           />
         ))}
@@ -484,7 +484,7 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
 
       {isPocketMode && (
         <div
-          className="absolute inset-0 z-[100] bg-black cursor-pointer flex flex-col justify-between p-6 touch-manipulation pb-safe shadow-[inset_0_0_100px_rgba(45,212,191,0.6)] border-4 border-teal-400/50"
+          className="absolute inset-0 z-100 bg-black cursor-pointer flex flex-col justify-between p-6 touch-manipulation pb-safe shadow-[inset_0_0_100px_rgba(45,212,191,0.6)] border-4 border-teal-400/50"
           onClick={() => handleIncrement(true)}
         >
           {/* ... Pocket Mode Content ... */}
@@ -504,7 +504,7 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
             </button>
           </div>
 
-          <div className="flex-1 flex flex-col items-center justify-center my-4 overflow-hidden relative">
+          <div className="fixed inset-0 z-100 flex items-center justify-center p-6 animate-in fade-in duration-300">
             <div className="text-[120px] font-mono font-bold text-stone-200 leading-none tracking-tighter drop-shadow-lg select-none pointer-events-none">
               {count}
             </div>
@@ -528,7 +528,7 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
       )}
 
       <div className="px-4 py-4 flex items-center justify-between bg-[#ecfdf5]/90 backdrop-blur-sm border-b border-emerald-100 z-20 sticky top-0">
-        <button onClick={handleBack} className="p-2 -ml-2 text-stone-600 hover:text-teal-700 transition-colors">
+        <button onClick={onBack} className="p-2 text-white/80 hover:text-white transition-colors shrink-0">
           <ChevronLeft size={28} />
         </button>
         <h2 className="font-cinzel font-bold text-lg text-teal-900 truncate max-w-[160px]">{prayer.title}</h2>
@@ -618,7 +618,7 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
         <div className="max-w-xl mx-auto space-y-6">
           {/* Hatim Completion Banner */}
           {prayer.isHatimPart && isCompleted && (
-            <div className="bg-gradient-to-r from-teal-600 to-teal-500 p-4 rounded-xl shadow-lg text-white animate-in slide-in-from-top-4 mb-4">
+            <div className="bg-linear-to-r from-teal-600 to-teal-500 p-4 rounded-xl shadow-lg text-white animate-in slide-in-from-top-4 mb-4">
               <div className="flex items-center gap-3 mb-2">
                 <CheckCircle2 size={24} className="text-teal-200" />
                 <h3 className="font-bold text-lg">Cüz Tamamlandı!</h3>
@@ -737,7 +737,7 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
           <button
             onClick={() => handleIncrement(true)}
             title="Sayaç"
-            className="w-32 h-32 rounded-full bg-gradient-to-b from-teal-600 to-teal-800 shadow-[0_10px_30px_-10px_rgba(15,118,110,0.5)] flex flex-col items-center justify-center active:scale-95 transition-all active:shadow-none border-4 border-amber-500/30 group relative shrink-0"
+            className="w-32 h-32 rounded-full bg-linear-to-b from-teal-600 to-teal-800 shadow-[0_10px_30px_-10px_rgba(15,118,110,0.5)] flex flex-col items-center justify-center active:scale-95 transition-all active:shadow-none border-4 border-amber-500/30 group relative shrink-0"
           >
             <div className="absolute inset-2 border border-teal-400/30 rounded-full" />
             <span className="text-4xl font-bold text-white font-cinzel tabular-nums tracking-wider drop-shadow-md">

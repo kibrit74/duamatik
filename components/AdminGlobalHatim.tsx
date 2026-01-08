@@ -114,7 +114,7 @@ const AdminGlobalHatim: React.FC = () => {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-stone-600 mb-1 flex items-center gap-1">
+                            <label className="text-sm font-medium text-stone-600 mb-1 flex items-center gap-1">
                                 <Target size={14} /> Hedef (Hatim Sayısı)
                             </label>
                             <input
@@ -206,7 +206,7 @@ const AdminGlobalHatim: React.FC = () => {
                                     </div>
                                     <div className="h-3 bg-stone-100 rounded-full overflow-hidden">
                                         <div
-                                            className="h-full bg-gradient-to-r from-teal-500 to-emerald-500 rounded-full transition-all"
+                                            className="h-full bg-linear-to-r from-teal-500 to-emerald-500 rounded-full transition-all"
                                             style={{ width: `${getProgress(campaign)}%` }}
                                         />
                                     </div>
@@ -258,10 +258,10 @@ const AdminGlobalHatim: React.FC = () => {
                                             <div
                                                 key={partNo}
                                                 className={`aspect-square rounded-lg flex items-center justify-center text-sm font-bold ${part?.completed
-                                                        ? 'bg-green-500 text-white'
-                                                        : part
-                                                            ? 'bg-amber-100 text-amber-700 border-2 border-amber-200'
-                                                            : 'bg-stone-100 text-stone-400'
+                                                    ? 'bg-green-500 text-white'
+                                                    : part
+                                                        ? 'bg-amber-100 text-amber-700 border-2 border-amber-200'
+                                                        : 'bg-stone-100 text-stone-400'
                                                     }`}
                                             >
                                                 {partNo}

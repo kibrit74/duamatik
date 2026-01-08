@@ -198,7 +198,7 @@ const PrayerCoach: React.FC<PrayerCoachProps> = ({ onClose, isPremium, onOpenPre
             <div className="bg-white/90 backdrop-blur-md px-4 py-3 border-b border-emerald-100 relative z-10 shadow-sm flex items-center justify-between">
                 <div className="flex items-center gap-3">
                     <div className="relative">
-                        <div className="bg-gradient-to-tr from-teal-500 to-emerald-600 w-10 h-10 rounded-full flex items-center justify-center text-white shadow-md border-2 border-white">
+                        <div className="bg-linear-to-tr from-teal-500 to-emerald-600 w-10 h-10 rounded-full flex items-center justify-center text-white shadow-md border-2 border-white">
                             <Sparkles size={20} />
                         </div>
                         <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full animate-pulse"></div>

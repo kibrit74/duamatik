@@ -17,15 +17,13 @@ import {
   CustomPrayer,
   UserPrayerProgress
 } from './supabase';
+import { seedPrayers } from './seedPrayers';
 
-const DB_NAME = 'TasbihDB';
-const DB_VERSION = 3; // Incremented for sync support
-const STORE_PRAYERS = 'prayers';
-const STORE_HATIM = 'hatim_tracking';
-const STORE_SYNC_META = 'sync_meta';
+// Local storage keys for minimal caching
+const LS_PRAYERS_CACHE = 'prayers_cache';
+const LS_HATIM_CACHE = 'hatim_cache';
 
 class DatabaseService {
-  private db: IDBDatabase | null = null;
   private userId: string | null = null;
   private supabaseAvailable: boolean = false;
 
@@ -41,55 +39,54 @@ class DatabaseService {
     // Check Supabase availability
     try {
       const tables = await checkTablesExist();
-      this.supabaseAvailable = tables.prayers && tables.customPrayers;
+      // userPrayers tablosu yeterli - prayers tablosu RLS'den dolayı erişilemeyebilir
+      this.supabaseAvailable = tables.userPrayers || tables.customPrayers;
+      logger.log('Supabase availability:', this.supabaseAvailable, tables);
     } catch (e) {
       this.supabaseAvailable = false;
-      logger.warn('Supabase not available, using offline mode');
+      logger.warn('Supabase not available, using offline fallback');
     }
-
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-      request.onerror = () => reject(request.error);
-
-      request.onsuccess = () => {
-        this.db = request.result;
-        resolve();
-      };
-
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-
-        if (!db.objectStoreNames.contains(STORE_PRAYERS)) {
-          db.createObjectStore(STORE_PRAYERS, { keyPath: 'id' });
-        }
-
-        if (!db.objectStoreNames.contains(STORE_HATIM)) {
-          db.createObjectStore(STORE_HATIM, { keyPath: 'partNo' });
-        }
-
-        if (!db.objectStoreNames.contains(STORE_SYNC_META)) {
-          db.createObjectStore(STORE_SYNC_META, { keyPath: 'key' });
-        }
-      };
-    });
   }
 
-  // --- SYNC METHODS ---
+  // --- Prayer Methods (Supabase-only) ---
 
-  async syncFromSupabase(): Promise<Prayer[]> {
+  async getAllPrayers(): Promise<Prayer[]> {
+    // Auto-init if not done yet
+    if (!this.supabaseAvailable && this.userId) {
+      await this.init();
+    }
+
     if (!this.supabaseAvailable || !this.userId) {
-      logger.log('Supabase sync skipped (not available or no user)');
-      return this.getAllPrayersLocal();
+      logger.log('Supabase not available, using cached/default prayers');
+      return this.getCachedPrayers();
     }
 
     try {
       // 1. Get catalog prayers from Supabase
       let catalogPrayers = await getCatalogPrayers();
 
-      // Fallback: If catalog fetch fails or returns empty (e.g. network issue or RLS), use defaults
       if (!catalogPrayers || catalogPrayers.length === 0) {
-        logger.warn('Supabase catalog empty/failed, using default prayers fallback');
+        // Check if we already tried seeding recently to prevent loops
+        const hasSeeded = typeof localStorage !== 'undefined' && localStorage.getItem('HAS_SEEDED_PRAYERS');
+
+        if (!hasSeeded) {
+          logger.warn('Supabase catalog empty, triggering auto-seed...');
+          try {
+            await seedPrayers();
+            if (typeof localStorage !== 'undefined') {
+              localStorage.setItem('HAS_SEEDED_PRAYERS', 'true');
+            }
+            catalogPrayers = await getCatalogPrayers();
+          } catch (seedError) {
+            logger.error('Auto-seed failed:', seedError);
+          }
+        } else {
+          logger.warn('Supabase catalog empty and seed already run. Using defaults (Check RLS policies).');
+        }
+      }
+
+      if (!catalogPrayers || catalogPrayers.length === 0) {
+        logger.warn('Supabase catalog still empty after seed, using defaults');
         catalogPrayers = defaultPrayers.map(p => ({
           id: p.id,
           title: p.title,
@@ -110,7 +107,6 @@ class DatabaseService {
       // 4. Merge catalog prayers with user progress
       const mergedPrayers: Prayer[] = [];
 
-      // Add catalog prayers with progress
       for (const cp of catalogPrayers) {
         const progress = userProgress.find(up => up.prayer_id === cp.id);
 
@@ -126,7 +122,6 @@ class DatabaseService {
           lastUpdated: progress ? new Date(progress.last_updated).getTime() : Date.now(),
           history: progress?.history || [],
           reminder: progress?.reminder,
-          audioBase64: undefined, // Will be loaded on demand
           _audioUrl: progress?.audio_url || undefined,
           _isCatalog: true,
         } as Prayer & { _audioUrl?: string; _isCatalog?: boolean });
@@ -153,35 +148,42 @@ class DatabaseService {
         } as Prayer & { _audioUrl?: string; _isCustom?: boolean });
       }
 
-      // 5. Cache to IndexedDB
-      const uniquePrayers = Array.from(new Map(mergedPrayers.map(p => [p.id, p])).values());
-      await this.cachePrayersLocally(uniquePrayers);
+      // Cache to localStorage for offline fallback
+      this.cachePrayers(mergedPrayers);
 
-      // 6. Save last sync time
-      await this.setSyncMeta('lastSync', Date.now());
-
-      return uniquePrayers;
+      return mergedPrayers;
     } catch (error) {
-      logger.error('Sync from Supabase failed:', error);
-      // Fallback to local data
-      return this.getAllPrayersLocal();
+      logger.error('Error fetching prayers from Supabase:', error);
+      return this.getCachedPrayers();
     }
   }
 
-  async syncToSupabase(prayer: Prayer): Promise<boolean> {
+  async savePrayer(prayer: Prayer): Promise<void> {
+    // Cache locally first
+    const cached = this.getCachedPrayers();
+    const idx = cached.findIndex(p => p.id === prayer.id);
+    if (idx >= 0) {
+      cached[idx] = prayer;
+    } else {
+      cached.push(prayer);
+    }
+    this.cachePrayers(cached);
+
+    // Auto-init if not done yet
+    if (!this.supabaseAvailable && this.userId) {
+      await this.init();
+    }
+
+    // Save to Supabase
     if (!this.supabaseAvailable || !this.userId) {
-      return false;
+      logger.warn('Supabase not available, prayer saved locally only');
+      return;
     }
 
     try {
-      const isCustom = (prayer as any)._isCustom || !((prayer as any)._isCatalog);
+      const isCatalog = (prayer as any)._isCatalog;
 
-      // Check if this prayer exists in catalog
-      const catalogPrayers = await getCatalogPrayers();
-      const isCatalogPrayer = catalogPrayers.some(cp => cp.id === prayer.id);
-
-      if (isCatalogPrayer) {
-        // Save progress for catalog prayer
+      if (isCatalog) {
         await saveUserPrayerProgress(
           this.userId,
           prayer.id,
@@ -191,161 +193,37 @@ class DatabaseService {
           (prayer as any)._audioUrl
         );
       } else {
-        // Save as custom prayer
         await saveCustomPrayer(this.userId, prayer);
       }
-
-      return true;
     } catch (error) {
-      logger.error('Sync to Supabase failed:', error);
-      return false;
-    }
-  }
-
-  // --- Prayer Methods with Sync ---
-
-  async getAllPrayers(): Promise<Prayer[]> {
-    if (!this.db) await this.init();
-
-    // Try to sync from Supabase first if online
-    if (this.supabaseAvailable && this.userId) {
-      return this.syncFromSupabase();
-    }
-
-    return this.getAllPrayersLocal();
-  }
-
-  private async getAllPrayersLocal(): Promise<Prayer[]> {
-    if (!this.db) await this.init();
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([STORE_PRAYERS], 'readwrite');
-      const store = transaction.objectStore(STORE_PRAYERS);
-      const request = store.getAll();
-
-      request.onsuccess = async () => {
-        const prayers = request.result;
-
-        // If DB is empty or has very few items (indicating partial/failed sync), merge with defaults
-        if (prayers.length < 50) {
-          logger.log('Local DB has few items (' + prayers.length + '), merging with defaults...');
-          // Import defaults dynamically to avoid circular dependency issues if any
-          const { defaultPrayers } = await import('../data/defaults');
-
-          // Helper to add missing
-          for (const defPrayer of defaultPrayers) {
-            const exists = prayers.some((p: Prayer) => this.normalizeTitle(p.title) === this.normalizeTitle(defPrayer.title));
-            if (!exists) {
-              store.put(defPrayer);
-              prayers.push(defPrayer);
-            }
-          }
-          const uniquePrayers = Array.from(new Map(prayers.map((p: Prayer) => [p.id, p])).values());
-          resolve(uniquePrayers);
-        } else {
-          const uniquePrayers = Array.from(new Map(prayers.map((p: Prayer) => [p.id, p])).values());
-          resolve(uniquePrayers);
-        }
-      };
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async savePrayer(prayer: Prayer): Promise<void> {
-    if (!this.db) await this.init();
-
-    // Save to IndexedDB first (offline-first)
-    await new Promise<void>((resolve, reject) => {
-      const transaction = this.db!.transaction([STORE_PRAYERS], 'readwrite');
-      const store = transaction.objectStore(STORE_PRAYERS);
-      const request = store.put(prayer);
-
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
-
-    // Then sync to Supabase in background
-    if (this.supabaseAvailable && this.userId) {
-      this.syncToSupabase(prayer).catch(err => {
-        logger.warn('Background sync failed:', err);
-      });
+      logger.error('Error saving prayer to Supabase:', error);
     }
   }
 
   async seedPrayers(prayers: Prayer[]): Promise<void> {
-    if (!this.db) await this.init();
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([STORE_PRAYERS], 'readwrite');
-      const store = transaction.objectStore(STORE_PRAYERS);
-
-      let completed = 0;
-      let errors = 0;
-
-      if (prayers.length === 0) {
-        resolve();
-        return;
-      }
-
-      prayers.forEach(prayer => {
-        const request = store.add(prayer);
-        request.onsuccess = () => {
-          completed++;
-          if (completed + errors === prayers.length) resolve();
-        };
-        request.onerror = () => {
-          errors++;
-          if (completed + errors === prayers.length) resolve();
-        };
-      });
-    });
+    // Just cache them - Supabase catalog should be the source of truth
+    this.cachePrayers(prayers);
   }
 
   async deletePrayer(id: string): Promise<void> {
-    if (!this.db) await this.init();
+    // Remove from cache
+    const cached = this.getCachedPrayers().filter(p => p.id !== id);
+    this.cachePrayers(cached);
 
-    // Delete from IndexedDB
-    await new Promise<void>((resolve, reject) => {
-      const transaction = this.db!.transaction([STORE_PRAYERS], 'readwrite');
-      const store = transaction.objectStore(STORE_PRAYERS);
-      const request = store.delete(id);
-
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+    // Auto-init if not done yet
+    if (!this.supabaseAvailable && this.userId) {
+      await this.init();
+    }
 
     // Delete from Supabase
-    if (this.supabaseAvailable && this.userId) {
-      try {
-        // Try to delete as custom prayer first
-        await deleteCustomPrayer(id);
-        // Also delete any audio
-        await deletePrayerAudio(this.userId, id);
-      } catch (err) {
-        logger.warn('Supabase delete failed:', err);
-      }
+    if (!this.supabaseAvailable || !this.userId) return;
+
+    try {
+      await deleteCustomPrayer(id);
+      await deletePrayerAudio(this.userId, id);
+    } catch (err) {
+      logger.warn('Supabase delete failed:', err);
     }
-  }
-
-  async addMissingPrayers(defaults: Prayer[]): Promise<number> {
-    if (!this.db) await this.init();
-    const existing = await this.getAllPrayersLocal();
-    const existingTitles = new Set(existing.map(p => p.title.toLowerCase().trim()));
-
-    let addedCount = 0;
-
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([STORE_PRAYERS], 'readwrite');
-      const store = transaction.objectStore(STORE_PRAYERS);
-
-      defaults.forEach(prayer => {
-        if (!existingTitles.has(prayer.title.toLowerCase().trim())) {
-          store.add(prayer);
-          addedCount++;
-        }
-      });
-
-      transaction.oncomplete = () => resolve(addedCount);
-      transaction.onerror = () => reject(transaction.error);
-    });
   }
 
   // --- Audio Methods ---
@@ -354,7 +232,6 @@ class DatabaseService {
     if (!this.supabaseAvailable || !this.userId) {
       return null;
     }
-
     return uploadPrayerAudio(this.userId, prayerId, audioBase64);
   }
 
@@ -362,171 +239,80 @@ class DatabaseService {
     if (!this.supabaseAvailable || !this.userId) {
       return false;
     }
-
     return deletePrayerAudio(this.userId, prayerId);
   }
 
-  // --- Local Cache Methods ---
+  // --- LocalStorage Cache Methods ---
 
-  private async cachePrayersLocally(prayers: Prayer[]): Promise<void> {
-    if (!this.db) await this.init();
-
-    const transaction = this.db!.transaction([STORE_PRAYERS], 'readwrite');
-    const store = transaction.objectStore(STORE_PRAYERS);
-
-    // Clear existing
-    store.clear();
-
-    // Add new
-    prayers.forEach(prayer => {
-      store.add(prayer);
-    });
+  private getCachedPrayers(): Prayer[] {
+    try {
+      const cached = localStorage.getItem(LS_PRAYERS_CACHE);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (e) {
+      logger.warn('Error reading prayer cache:', e);
+    }
+    return defaultPrayers;
   }
 
-  private async setSyncMeta(key: string, value: any): Promise<void> {
-    if (!this.db) await this.init();
-
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([STORE_SYNC_META], 'readwrite');
-      const store = transaction.objectStore(STORE_SYNC_META);
-      const request = store.put({ key, value });
-
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  private async getSyncMeta(key: string): Promise<any> {
-    if (!this.db) await this.init();
-
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([STORE_SYNC_META], 'readonly');
-      const store = transaction.objectStore(STORE_SYNC_META);
-      const request = store.get(key);
-
-      request.onsuccess = () => resolve(request.result?.value);
-      request.onerror = () => reject(request.error);
-    });
+  private cachePrayers(prayers: Prayer[]): void {
+    try {
+      localStorage.setItem(LS_PRAYERS_CACHE, JSON.stringify(prayers));
+    } catch (e) {
+      logger.warn('Error caching prayers:', e);
+    }
   }
 
   // --- Hatim Tracking Methods ---
 
   async getHatimStatus(): Promise<HatimPartStatus[]> {
-    if (!this.db) await this.init();
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([STORE_HATIM], 'readonly');
-      const store = transaction.objectStore(STORE_HATIM);
-      const request = store.getAll();
+    try {
+      const cached = localStorage.getItem(LS_HATIM_CACHE);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (e) {
+      logger.warn('Error reading hatim cache:', e);
+    }
 
-      request.onsuccess = () => {
-        const result = request.result as HatimPartStatus[];
-        const fullList: HatimPartStatus[] = [];
-        for (let i = 1; i <= 30; i++) {
-          const existing = result.find(r => r.partNo === i);
-          if (existing) {
-            fullList.push(existing);
-          } else {
-            fullList.push({ partNo: i, status: 'empty' });
-          }
-        }
-        resolve(fullList);
-      };
-      request.onerror = () => reject(request.error);
-    });
+    // Return default empty list
+    const fullList: HatimPartStatus[] = [];
+    for (let i = 1; i <= 30; i++) {
+      fullList.push({ partNo: i, status: 'empty' });
+    }
+    return fullList;
   }
 
   async saveHatimPart(part: HatimPartStatus): Promise<void> {
-    if (!this.db) await this.init();
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([STORE_HATIM], 'readwrite');
-      const store = transaction.objectStore(STORE_HATIM);
-      const request = store.put(part);
-
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+    try {
+      const current = await this.getHatimStatus();
+      const idx = current.findIndex(p => p.partNo === part.partNo);
+      if (idx >= 0) {
+        current[idx] = part;
+      } else {
+        current.push(part);
+      }
+      localStorage.setItem(LS_HATIM_CACHE, JSON.stringify(current));
+    } catch (e) {
+      logger.warn('Error saving hatim part:', e);
+    }
   }
 
   async resetHatim(): Promise<void> {
-    if (!this.db) await this.init();
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([STORE_HATIM], 'readwrite');
-      const store = transaction.objectStore(STORE_HATIM);
-      const request = store.clear();
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+    localStorage.removeItem(LS_HATIM_CACHE);
   }
-  // --- Maintenance Methods ---
 
-  private normalizeTitle(title: string): string {
-    return title.trim().toLowerCase().replace(/\s+/g, ' ');
-  }
+  // --- Deprecated methods (no-op for backwards compatibility) ---
 
   async runDeduplication(): Promise<number> {
-    if (!this.db) await this.init();
+    logger.log('Deduplication skipped - using Supabase-only');
+    return 0;
+  }
 
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([STORE_PRAYERS], 'readwrite');
-      const store = transaction.objectStore(STORE_PRAYERS);
-      const request = store.getAll();
-
-      request.onsuccess = () => {
-        const prayers = request.result as Prayer[];
-        const groups = new Map<string, Prayer[]>();
-
-        // Group by normalized title
-        prayers.forEach(p => {
-          const key = this.normalizeTitle(p.title);
-          if (!groups.has(key)) {
-            groups.set(key, []);
-          }
-          groups.get(key)!.push(p);
-        });
-
-        let removedCount = 0;
-
-        // Process groups
-        groups.forEach((group, key) => {
-          if (group.length > 1) {
-            logger.log(`Found duplicates for "${key}": ${group.length} items`);
-
-            // Sort: Prefer items with Supabase-like IDs (uuids) or longer history
-            // Actually, we should prefer the one that looks most "official" or oldest?
-            // Let's just pick the first one as master, but merge counts.
-            // Better: Pick the one that might be a valid UUID vs a generated one if we can tell.
-            // For now, just taking the first one is safe enough if we merge data.
-
-            const master = group[0];
-            let totalCount = 0;
-            let combinedHistory: any[] = [];
-
-            group.forEach(p => {
-              totalCount += p.currentCount;
-              if (p.history) combinedHistory = [...combinedHistory, ...p.history];
-            });
-
-            // Update master
-            master.currentCount = totalCount;
-            master.history = combinedHistory;
-
-            // Delete others
-            for (let i = 1; i < group.length; i++) {
-              store.delete(group[i].id);
-              removedCount++;
-            }
-
-            // Save master
-            store.put(master);
-          }
-        });
-
-        logger.log(`Deduplication complete. Removed ${removedCount} duplicates.`);
-        resolve(removedCount);
-      };
-
-      request.onerror = () => reject(request.error);
-    });
+  async addMissingPrayers(defaults: Prayer[]): Promise<number> {
+    logger.log('addMissingPrayers skipped - using Supabase catalog');
+    return 0;
   }
 }
 

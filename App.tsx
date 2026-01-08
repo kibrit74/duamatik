@@ -3,8 +3,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Navigation from './components/Navigation';
 import Counter from './components/Counter';
 import Logo from './components/Logo';
-const AddPrayer = React.lazy(() => import('./components/AddPrayer'));
-const SearchPrayer = React.lazy(() => import('./components/SearchPrayer'));
+const AddPrayerTabs = React.lazy(() => import('./components/AddPrayerTabs'));
 const Profile = React.lazy(() => import('./components/Profile'));
 const Settings = React.lazy(() => import('./components/Settings'));
 const ReminderModal = React.lazy(() => import('./components/ReminderModal'));
@@ -17,15 +16,20 @@ const Auth = React.lazy(() => import('./components/Auth'));
 const PrayerCoach = React.lazy(() => import('./components/PrayerCoach'));
 const DreamInterpreter = React.lazy(() => import('./components/DreamInterpreter'));
 const PremiumModal = React.lazy(() => import('./components/PremiumModal'));
+const ArticlesPage = React.lazy(() => import('./components/ArticlesPage'));
+const ArticleDetail = React.lazy(() => import('./components/ArticleDetail'));
 import LoadingScreen from './components/LoadingScreen';
 import { dbService } from './services/db';
-import { getQuotes, getActiveBanners, getAppConfig, Banner, AppConfig } from './services/supabase';
-import { runSeed } from './services/seedData';
+import { getQuotes, getActiveBanners, getAppConfig, Banner, AppConfig, Article } from './services/supabase';
+import { runSeed, seedArticles } from './services/seedData';
+import { seedPrayers } from './services/seedPrayers';
 import { authService } from './services/authService';
 
 // Expose runSeed to window for console access
 if (typeof window !== 'undefined') {
   (window as any).runSeed = runSeed;
+  (window as any).seedArticles = seedArticles;
+  (window as any).seedPrayers = seedPrayers;
 }
 import { Loader2 } from 'lucide-react';
 import { defaultPrayers } from './data/defaults';
@@ -57,6 +61,7 @@ const MobileApp: React.FC = () => {
   const [activeBanners, setActiveBanners] = useState<Banner[]>([]);
   const [appConfig, setAppConfig] = useState<AppConfig>({});
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
+  const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
 
   // Settings State
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
@@ -274,13 +279,6 @@ const MobileApp: React.FC = () => {
         // First time - seed with defaults
         await dbService.seedPrayers(defaultPrayers);
         loadedPrayers = await dbService.getAllPrayers();
-      } else {
-        // Run cleanup for existing users to fix duplicate issues
-        const removed = await dbService.runDeduplication();
-        if (removed > 0) {
-          // Reload if we removed items
-          loadedPrayers = await dbService.getAllPrayers();
-        }
       }
 
       setPrayers(loadedPrayers.sort((a, b) => b.lastUpdated - a.lastUpdated));
@@ -441,13 +439,12 @@ const MobileApp: React.FC = () => {
         />
       );
     }
-    if (view === 'ADD') {
-      return <AddPrayer onSave={handleSavePrayer} onCancel={() => setView('HOME')} initialData={draftPrayer} onOpenPremium={() => setShowPremiumModal(true)} />;
-    }
-    if (view === 'SEARCH') {
+    if (view === 'ADD' || view === 'SEARCH') {
       return (
-        <SearchPrayer
-          onDraft={handleDraftFromSearch}
+        <AddPrayerTabs
+          onSave={handleSavePrayer}
+          onCancel={() => setView('HOME')}
+          onOpenPremium={() => setShowPremiumModal(true)}
           onOpenCoach={() => setView('COACH')}
           onOpenDream={() => setView('DREAM')}
         />
@@ -488,6 +485,28 @@ const MobileApp: React.FC = () => {
     if (view === 'SOCIAL') {
       return <SocialHub onClose={() => setView('HOME')} user={user} />;
     }
+    if (view === 'ARTICLES') {
+      return (
+        <ArticlesPage
+          onSelectArticle={(article) => {
+            setSelectedArticle(article);
+            setView('ARTICLE_DETAIL');
+          }}
+          onBack={() => setView('HOME')}
+        />
+      );
+    }
+    if (view === 'ARTICLE_DETAIL' && selectedArticle) {
+      return (
+        <ArticleDetail
+          article={selectedArticle}
+          onBack={() => {
+            setSelectedArticle(null);
+            setView('ARTICLES');
+          }}
+        />
+      );
+    }
 
     // HOME VIEW
 
@@ -498,9 +517,9 @@ const MobileApp: React.FC = () => {
           onClose={() => setShowNotifications(false)}
           user={user}
         />
-        <div className="islamic-pattern absolute inset-0 z-0 pointer-events-none opacity-10 fixed"></div>
+        <div className="islamic-pattern fixed inset-0 z-0 pointer-events-none opacity-10"></div>
 
-        <div className="bg-white/60 backdrop-blur-md pt-8 pb-8 px-4 rounded-b-[2rem] shadow-sm border-b border-emerald-100/50 z-10 flex flex-col items-center text-center relative">
+        <div className="bg-white/60 backdrop-blur-md pt-8 pb-8 px-4 rounded-b-4xl shadow-sm border-b border-emerald-100/50 z-10 flex flex-col items-center text-center relative">
 
           <button
             onClick={() => setShowNotifications(true)}
@@ -564,7 +583,7 @@ const MobileApp: React.FC = () => {
           {/* Coach Banner */}
           <div
             onClick={() => setView('COACH')}
-            className="bg-gradient-to-r from-violet-600 to-indigo-600 rounded-2xl p-4 text-white shadow-lg shadow-indigo-500/20 cursor-pointer relative overflow-hidden group active:scale-[0.98] transition-all flex flex-col justify-between min-h-[100px]"
+            className="bg-linear-to-r from-violet-600 to-indigo-600 rounded-2xl p-4 text-white shadow-lg shadow-indigo-500/20 cursor-pointer relative overflow-hidden group active:scale-[0.98] transition-all flex flex-col justify-between min-h-[100px]"
           >
             <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full -mr-8 -mt-8 blur-2xl group-hover:bg-white/20 transition-colors"></div>
             <div className="relative z-10">
@@ -582,7 +601,7 @@ const MobileApp: React.FC = () => {
           {/* Dream Banner */}
           <div
             onClick={() => setView('DREAM')}
-            className="bg-gradient-to-r from-purple-800 to-fuchsia-900 rounded-2xl p-4 text-white shadow-lg shadow-purple-500/20 cursor-pointer relative overflow-hidden group active:scale-[0.98] transition-all flex flex-col justify-between min-h-[100px]"
+            className="bg-linear-to-r from-purple-800 to-fuchsia-900 rounded-2xl p-4 text-white shadow-lg shadow-purple-500/20 cursor-pointer relative overflow-hidden group active:scale-[0.98] transition-all flex flex-col justify-between min-h-[100px]"
           >
             <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(#fff 1px, transparent 1px)', backgroundSize: '12px 12px' }}></div>
             <div className="relative z-10">
@@ -707,10 +726,10 @@ const MobileApp: React.FC = () => {
     );
   };
 
-  const showNavigation = view === 'HOME' || view === 'SEARCH' || view === 'PROFILE' || view === 'SETTINGS' || view === 'SOCIAL';
+  const showNavigation = view === 'HOME' || view === 'SEARCH' || view === 'PROFILE' || view === 'SETTINGS' || view === 'SOCIAL' || view === 'ARTICLES';
 
   return (
-    <div className="font-sans text-stone-900 bg-[#ecfdf5] w-full h-[100dvh] max-w-md mx-auto relative shadow-2xl overflow-hidden flex flex-col select-none">
+    <div className="font-sans text-stone-900 bg-[#ecfdf5] w-full h-dvh max-w-md mx-auto relative shadow-2xl overflow-hidden flex flex-col select-none">
       <React.Suspense fallback={<LoadingScreen message="Yükleniyor..." />}>
         <div className="flex-1 w-full relative overflow-hidden">
           {renderContent()}

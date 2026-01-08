@@ -374,7 +374,7 @@ const AdminTechnical: React.FC = () => {
                             </div>
 
                             {/* Total Cost */}
-                            <div className="bg-gradient-to-r from-rose-50 to-orange-50 p-4 rounded-xl border border-rose-200">
+                            <div className="bg-linear-to-r from-rose-50 to-orange-50 p-4 rounded-xl border border-rose-200">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-3">
                                         <div className="w-10 h-10 bg-rose-500 rounded-xl flex items-center justify-center text-white">

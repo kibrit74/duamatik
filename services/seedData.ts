@@ -13,6 +13,9 @@ import { seedCatalogPrayers, seedQuotes, checkTablesExist } from './supabase';
 import { defaultPrayers } from '../data/defaults';
 import { quotes } from '../data/quotes';
 import { logger } from '../utils/logger';
+import { seedArticles } from '../seedArticles';
+
+export { seedArticles };
 
 export async function runSeed(): Promise<void> {
     logger.log('🌱 Starting database seed...');

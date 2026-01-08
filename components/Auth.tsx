@@ -134,7 +134,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-4 bg-gradient-to-r from-teal-700 to-teal-600 text-white rounded-xl font-bold font-cinzel shadow-lg shadow-teal-700/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-70"
+            className="w-full py-4 bg-linear-to-r from-teal-700 to-teal-600 text-white rounded-xl font-bold font-cinzel shadow-lg shadow-teal-700/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 mt-4 disabled:opacity-70"
           >
             {loading ? <Loader2 className="animate-spin" /> : (
               <>

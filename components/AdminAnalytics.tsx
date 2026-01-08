@@ -110,7 +110,7 @@ const AdminAnalytics: React.FC = () => {
                                             </div>
                                             <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
                                                 <div
-                                                    className="h-full bg-gradient-to-r from-teal-500 to-emerald-500 rounded-full transition-all"
+                                                    className="h-full bg-linear-to-r from-teal-500 to-emerald-500 rounded-full transition-all"
                                                     style={{ width: `${(prayer.total_count / maxCount) * 100}%` }}
                                                 />
                                             </div>
@@ -138,7 +138,7 @@ const AdminAnalytics: React.FC = () => {
                                         <div key={idx} className="flex-1 flex flex-col items-center gap-1">
                                             <span className="text-xs text-stone-500">{day.count}</span>
                                             <div
-                                                className="w-full bg-gradient-to-t from-purple-500 to-purple-400 rounded-t-lg transition-all"
+                                                className="w-full bg-linear-to-t from-purple-500 to-purple-400 rounded-t-lg transition-all"
                                                 style={{ height: `${Math.max(height, 5)}%` }}
                                             />
                                             <span className="text-[10px] text-stone-400">

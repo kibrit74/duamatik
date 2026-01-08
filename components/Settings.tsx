@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Bell, Smartphone, History, User as UserIcon, AlertCircle, LogOut, Mail, Crown, MapPin, ArrowRight, Calendar } from 'lucide-react';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { dbService } from '../services/db';
 import { defaultPrayers } from '../data/defaults';
 import { User, Prayer } from '../types';
@@ -17,7 +18,7 @@ interface SettingsProps {
 }
 
 const Settings: React.FC<SettingsProps> = ({ notificationsEnabled, setNotificationsEnabled, user, onLogout, prayers = [], onOpenPrayer }) => {
-  const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>('default');
+  const [permissionStatus, setPermissionStatus] = useState<'granted' | 'denied' | 'prompt'>('prompt');
   const isNative = Capacitor.isNativePlatform();
 
   // Son açılan dualar (currentCount > 0 ve lastUpdated'e göre sıralı)
@@ -35,35 +36,49 @@ const Settings: React.FC<SettingsProps> = ({ notificationsEnabled, setNotificati
     .slice(0, 5);
 
   useEffect(() => {
-    if ('Notification' in window) {
-      setPermissionStatus(Notification.permission);
-    }
+    const checkPermissions = async () => {
+      try {
+        const result = await LocalNotifications.checkPermissions();
+        setPermissionStatus(result.display);
+      } catch (e) {
+        console.error('Permission check failed', e);
+        setPermissionStatus('prompt');
+      }
+    };
+    checkPermissions();
   }, []);
 
   const requestPermission = async () => {
-    if (!('Notification' in window)) {
-      alert("Tarayıcınız bildirimleri desteklemiyor.");
-      return;
-    }
-
     try {
-      const permission = await Notification.requestPermission();
-      setPermissionStatus(permission);
+      const result = await LocalNotifications.requestPermissions();
+      setPermissionStatus(result.display);
 
-      if (permission === 'granted') {
+      if (result.display === 'granted') {
         setNotificationsEnabled(true);
-        new Notification("Bildirim İzni Alındı", {
-          body: "Tesbihat hatırlatıcıları artık çalışacak.",
-          icon: '/icon.png'
+        // Send test notification to confirm
+        await LocalNotifications.schedule({
+          notifications: [
+            {
+              title: "Bildirim İzni Alındı",
+              body: "Tesbihat hatırlatıcıları artık çalışacak.",
+              id: Math.floor(Math.random() * 100000),
+              schedule: { at: new Date(Date.now() + 1000) },
+              sound: undefined,
+              attachments: undefined,
+              actionTypeId: "",
+              extra: null
+            }
+          ]
         });
-      } else if (permission === 'denied') {
+      } else if (result.display === 'denied') {
         setNotificationsEnabled(false);
-        alert("Bildirim izni reddedildi. Lütfen tarayıcı ayarlarından (adres çubuğundaki kilit simgesi) bildirimlere izin verin.");
+        alert("Bildirim izni reddedildi. Lütfen uygulama ayarlarından bildirimlere izin verin.");
       } else {
         setNotificationsEnabled(false);
       }
     } catch (error) {
       console.error("İzin istenirken hata oluştu", error);
+      alert("Bildirim izni alınamadı.");
     }
   };
 
@@ -81,15 +96,25 @@ const Settings: React.FC<SettingsProps> = ({ notificationsEnabled, setNotificati
     }
   };
 
-  const sendTestNotification = () => {
+  const sendTestNotification = async () => {
     if (permissionStatus === 'granted' && notificationsEnabled) {
       try {
-        new Notification("Test Bildirimi", {
-          body: "Bu bir test bildirimidir.",
-          icon: '/icon.png',
-          vibrate: [200, 100, 200]
-        } as any);
+        await LocalNotifications.schedule({
+          notifications: [
+            {
+              title: "Test Bildirimi",
+              body: "Bu bir test bildirimidir.",
+              id: Math.floor(Math.random() * 100000),
+              schedule: { at: new Date(Date.now() + 1000) },
+              sound: undefined,
+              attachments: undefined,
+              actionTypeId: "",
+              extra: null
+            }
+          ]
+        });
       } catch (e) {
+        console.error('Test notification failed', e);
         alert("Bildirim gönderilemedi.");
       }
     } else {
@@ -113,14 +138,14 @@ const Settings: React.FC<SettingsProps> = ({ notificationsEnabled, setNotificati
         {user && (
           <div className="bg-white/90 rounded-2xl shadow-sm border border-emerald-50 p-5">
             <div className="flex items-center gap-4">
-              <div className="w-16 h-16 bg-gradient-to-br from-teal-500 to-emerald-600 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow-lg">
+              <div className="w-16 h-16 bg-linear-to-br from-teal-500 to-emerald-600 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow-lg">
                 {user.name?.charAt(0) || 'K'}
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2">
                   <h3 className="font-bold text-lg text-stone-800">{user.name || 'Kullanıcı'}</h3>
                   {user.isPremium ? (
-                    <span className="flex items-center gap-1 px-2 py-0.5 bg-gradient-to-r from-amber-400 to-amber-500 text-white text-[10px] font-bold rounded-full shadow-sm">
+                    <span className="flex items-center gap-1 px-2 py-0.5 bg-linear-to-r from-amber-400 to-amber-500 text-white text-[10px] font-bold rounded-full shadow-sm">
                       <Crown size={10} /> PRO
                     </span>
                   ) : (
@@ -266,7 +291,7 @@ const Settings: React.FC<SettingsProps> = ({ notificationsEnabled, setNotificati
                 <p className="text-xs text-stone-500 mt-1">Belirlediğiniz zamanlarda dua hatırlatmaları alın.</p>
                 {permissionStatus === 'denied' && (
                   <p className="text-[10px] text-red-500 flex items-center gap-1 mt-1 font-bold">
-                    <AlertCircle size={10} /> Tarayıcıdan engellendi
+                    <AlertCircle size={10} /> Uygulama ayarlarından engellendi
                   </p>
                 )}
               </div>

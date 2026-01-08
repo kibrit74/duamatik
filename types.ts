@@ -36,7 +36,7 @@ export interface HatimPartStatus {
   assignedDate?: number;
 }
 
-export type ViewState = 'HOME' | 'COUNTER' | 'ADD' | 'SEARCH' | 'SETTINGS' | 'PROFILE' | 'SOCIAL' | 'ADMIN' | 'COACH' | 'DREAM';
+export type ViewState = 'HOME' | 'COUNTER' | 'ADD' | 'SEARCH' | 'SETTINGS' | 'PROFILE' | 'SOCIAL' | 'ADMIN' | 'COACH' | 'DREAM' | 'ARTICLES' | 'ARTICLE_DETAIL';
 
 export interface GroundingChunk {
   web?: {

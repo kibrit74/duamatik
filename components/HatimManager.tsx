@@ -201,7 +201,7 @@ const HatimManager: React.FC<HatimManagerProps> = ({ onClose }) => {
 
             {/* Assignment Modal */}
             {isAssigning && selectedPart && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+                <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
                     <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
                         <div className="bg-stone-50 p-4 border-b border-stone-100 flex justify-between items-center">
                             <h3 className="font-bold text-stone-800 flex items-center gap-2">

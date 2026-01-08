@@ -41,15 +41,15 @@ const AdminFinance: React.FC = () => {
             <h2 className="text-2xl font-bold text-stone-800">Finansal Yönetim</h2>
 
             <div className="grid grid-cols-3 gap-4">
-                <div className="bg-gradient-to-br from-green-500 to-emerald-600 p-6 rounded-2xl text-white">
+                <div className="bg-linear-to-br from-green-500 to-emerald-600 p-6 rounded-2xl text-white">
                     <div className="flex items-center gap-2 mb-2 opacity-80"><DollarSign size={18} /><span className="text-sm">Toplam</span></div>
                     <span className="text-3xl font-bold">{stats.total.toLocaleString('tr-TR')}₺</span>
                 </div>
-                <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-6 rounded-2xl text-white">
+                <div className="bg-linear-to-br from-blue-500 to-indigo-600 p-6 rounded-2xl text-white">
                     <div className="flex items-center gap-2 mb-2 opacity-80"><TrendingUp size={18} /><span className="text-sm">Bu Ay</span></div>
                     <span className="text-3xl font-bold">{stats.monthly.toLocaleString('tr-TR')}₺</span>
                 </div>
-                <div className="bg-gradient-to-br from-purple-500 to-fuchsia-600 p-6 rounded-2xl text-white">
+                <div className="bg-linear-to-br from-purple-500 to-fuchsia-600 p-6 rounded-2xl text-white">
                     <div className="flex items-center gap-2 mb-2 opacity-80"><Calendar size={18} /><span className="text-sm">Bu Yıl</span></div>
                     <span className="text-3xl font-bold">{stats.yearly.toLocaleString('tr-TR')}₺</span>
                 </div>

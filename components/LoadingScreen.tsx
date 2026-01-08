@@ -6,8 +6,9 @@ interface LoadingScreenProps {
 }
 
 const LoadingScreen: React.FC<LoadingScreenProps> = ({ message = "Yükleniyor..." }) => {
+    console.log('⏳ [LoadingScreen] Render edildi, mesaj:', message);
     return (
-        <div className="fixed inset-0 z-50 bg-gradient-to-b from-[#ecfdf5] to-[#ccfbf1] flex flex-col items-center justify-center p-6">
+        <div className="fixed inset-0 z-50 bg-linear-to-b from-[#ecfdf5] to-[#ccfbf1] flex flex-col items-center justify-center p-6">
             {/* Decorative Background Elements */}
             <div className="islamic-pattern absolute inset-0 opacity-10 pointer-events-none"></div>
 

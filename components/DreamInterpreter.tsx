@@ -58,7 +58,7 @@ const DreamInterpreter: React.FC<DreamInterpreterProps> = ({ onClose, isPremium,
     return (
         <div className="flex flex-col h-full bg-[#f8f7ff] relative overflow-hidden">
             {/* Night Sky Background */}
-            <div className="absolute inset-0 bg-gradient-to-b from-[#2e1065] to-[#4c1d95] z-0"></div>
+            <div className="absolute inset-0 bg-linear-to-b from-[#2e1065] to-[#4c1d95] z-0"></div>
             <div className="absolute inset-0 z-0 opacity-30" style={{ backgroundImage: 'radial-gradient(#fff 1px, transparent 1px)', backgroundSize: '30px 30px' }}></div>
 
             {showAdModal && (
@@ -91,7 +91,7 @@ const DreamInterpreter: React.FC<DreamInterpreterProps> = ({ onClose, isPremium,
                 {/* Intro Card */}
                 {!interpretation && !loading && (
                     <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl p-6 text-center text-purple-100 mb-6 animate-in fade-in slide-in-from-bottom-4">
-                        <div className="w-16 h-16 bg-gradient-to-br from-amber-300 to-amber-500 rounded-full mx-auto mb-4 flex items-center justify-center shadow-lg shadow-amber-500/30">
+                        <div className="w-16 h-16 bg-linear-to-br from-amber-300 to-amber-500 rounded-full mx-auto mb-4 flex items-center justify-center shadow-lg shadow-amber-500/30">
                             <Stars size={32} className="text-purple-900" />
                         </div>
                         <p className="font-serif italic text-lg mb-2">"Rüya, nübüvvetin kırk altı cüzünden bir cüzdür."</p>
@@ -125,7 +125,7 @@ const DreamInterpreter: React.FC<DreamInterpreterProps> = ({ onClose, isPremium,
                         <button
                             type="submit"
                             disabled={loading || !dreamText.trim()}
-                            className="w-full py-4 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-xl font-bold text-lg shadow-lg shadow-orange-500/30 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed group"
+                            className="w-full py-4 bg-linear-to-r from-amber-500 to-orange-600 text-white rounded-xl font-bold text-lg shadow-lg shadow-orange-500/30 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed group"
                         >
                             {loading ? (
                                 <>

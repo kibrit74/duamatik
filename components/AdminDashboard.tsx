@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Prayer, PrayerPackage, AdminNotification, Quote } from '../types';
-import { Users, BookOpen, BarChart3, Trash2, Ban, Bell, Plus, Package, MessageSquare, Send, LogOut, Settings, ChevronRight, Quote as QuoteIcon, History, X, Image, Globe, Shield, FileText, DollarSign, Wrench } from 'lucide-react';
-import { getAllUsers, sendGlobalNotification, getPackages, createPackage, updateUserStatus, createAdminNotification, getAdminNotifications, getQuotesFromDB, addQuote, deleteQuote } from '../services/supabase';
+import { Users, BookOpen, BarChart3, Trash2, Ban, Bell, Plus, Package, MessageSquare, Send, LogOut, Settings, ChevronRight, Quote as QuoteIcon, History, X, Image, Globe, Shield, FileText, DollarSign, Wrench, Search, Edit2 } from 'lucide-react';
+import { getAllUsers, sendGlobalNotification, getPackages, createPackage, updateUserStatus, createAdminNotification, getAdminNotifications, getQuotesFromDB, addQuote, deleteQuote, searchAdminUsers, updatePackage, deletePackage, updateQuote } from '../services/supabase';
 import AdminAnalytics from './AdminAnalytics';
 import AdminBanners from './AdminBanners';
 import AdminGlobalHatim from './AdminGlobalHatim';
@@ -38,6 +38,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ prayers, onBack }) => {
     const [newPkgTitle, setNewPkgTitle] = useState('');
     const [newPkgDesc, setNewPkgDesc] = useState('');
     const [isPkgPremium, setIsPkgPremium] = useState(false);
+
+    // User Search State
+    const [userSearchQuery, setUserSearchQuery] = useState('');
+    const [userFilterPremium, setUserFilterPremium] = useState<'all' | 'premium' | 'free'>('all');
+    const [searchingUsers, setSearchingUsers] = useState(false);
+
+    // Package Edit State
+    const [editingPackage, setEditingPackage] = useState<PrayerPackage | null>(null);
+    const [editPkgTitle, setEditPkgTitle] = useState('');
+    const [editPkgDesc, setEditPkgDesc] = useState('');
+    const [editPkgPremium, setEditPkgPremium] = useState(false);
+
+    // Quote Edit State
+    const [editingQuote, setEditingQuote] = useState<Quote | null>(null);
+    const [editQuoteText, setEditQuoteText] = useState('');
+    const [editQuoteSource, setEditQuoteSource] = useState('');
 
     useEffect(() => {
         loadData();
@@ -110,6 +126,54 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ prayers, onBack }) => {
         }
     };
 
+    // Package Edit Handlers
+    const startEditPackage = (pkg: PrayerPackage) => {
+        setEditingPackage(pkg);
+        setEditPkgTitle(pkg.title);
+        setEditPkgDesc(pkg.description || '');
+        setEditPkgPremium(pkg.isPremium || false);
+    };
+
+    const handleUpdatePackage = async () => {
+        if (!editingPackage) return;
+        const success = await updatePackage(editingPackage.id!, {
+            title: editPkgTitle,
+            description: editPkgDesc,
+            isPremium: editPkgPremium
+        });
+        if (success) {
+            setPackages(packages.map(p => p.id === editingPackage.id ? { ...p, title: editPkgTitle, description: editPkgDesc, isPremium: editPkgPremium } : p));
+            setEditingPackage(null);
+        }
+    };
+
+    const handleDeletePackage = async (id: string) => {
+        if (!confirm('Bu paketi silmek istediğinize emin misiniz?')) return;
+        const success = await deletePackage(id);
+        if (success) {
+            setPackages(packages.filter(p => p.id !== id));
+        }
+    };
+
+    // Quote Edit Handlers
+    const startEditQuote = (q: Quote) => {
+        setEditingQuote(q);
+        setEditQuoteText(q.text);
+        setEditQuoteSource(q.source);
+    };
+
+    const handleUpdateQuote = async () => {
+        if (!editingQuote || !editingQuote.id) return;
+        const success = await updateQuote(editingQuote.id, {
+            text: editQuoteText,
+            source: editQuoteSource
+        });
+        if (success) {
+            setQuotes(quotes.map(q => q.id === editingQuote.id ? { ...q, text: editQuoteText, source: editQuoteSource } : q));
+            setEditingQuote(null);
+        }
+    };
+
     const stats = [
         { label: 'Toplam Kullanıcı', value: users.length, icon: Users, color: 'bg-blue-500' },
         { label: 'Dua Paketi', value: packages.length, icon: Package, color: 'bg-purple-500' },
@@ -139,7 +203,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ prayers, onBack }) => {
                 {/* Logo */}
                 <div className="p-6 border-b border-stone-800">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-teal-500 to-emerald-600 rounded-xl flex items-center justify-center">
+                        <div className="w-10 h-10 bg-linear-to-br from-teal-500 to-emerald-600 rounded-xl flex items-center justify-center">
                             <Settings size={20} />
                         </div>
                         <div>
@@ -220,55 +284,118 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ prayers, onBack }) => {
 
                         {/* USERS */}
                         {activeTab === 'users' && (
-                            <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
-                                <div className="p-6 border-b border-stone-100">
-                                    <h3 className="font-bold text-stone-800 text-lg flex items-center gap-2">
-                                        <Users size={20} className="text-teal-600" />
-                                        Kayıtlı Kullanıcılar ({users.length})
-                                    </h3>
-                                </div>
-                                <div className="divide-y divide-stone-100">
-                                    {users.map(user => (
-                                        <div key={user.id} className="p-4 flex items-center justify-between hover:bg-stone-50 transition-colors">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-12 h-12 bg-gradient-to-br from-teal-400 to-teal-600 rounded-full flex items-center justify-center text-white font-bold text-lg">
-                                                    {user.name?.charAt(0) || 'U'}
-                                                </div>
-                                                <div>
-                                                    <div className="flex items-center gap-2">
-                                                        <h4 className="font-bold text-stone-800">{user.name}</h4>
-                                                        {user.isPremium && (
-                                                            <span className="bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0.5 rounded-full font-bold border border-amber-200">
-                                                                PRO
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <p className="text-sm text-stone-400">{user.email}</p>
-                                                    <div className="flex gap-2 mt-1.5">
-                                                        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100">
-                                                            {user.city || 'Şehir Yok'}
-                                                        </span>
-                                                        <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 border border-purple-100 font-medium">
-                                                            {user.stats?.totalZikir || 0} Zikir
-                                                        </span>
-                                                        <span className="text-xs px-2 py-0.5 rounded-full bg-teal-50 text-teal-600 border border-teal-100 font-medium">
-                                                            {user.stats?.totalPrayers || 0} Dua
-                                                        </span>
-                                                        <span className="text-xs px-2 py-0.5 rounded-full bg-stone-100 text-stone-500">
-                                                            {new Date(user.joinDate).toLocaleDateString('tr-TR')}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <button
-                                                onClick={() => handleBanUser(user.id)}
-                                                className="p-2 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                                title="Engelle"
-                                            >
-                                                <Ban size={18} />
-                                            </button>
+                            <div className="space-y-4">
+                                {/* Search & Filter Bar */}
+                                <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-4">
+                                    <div className="flex gap-4 items-center">
+                                        <div className="flex-1 relative">
+                                            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" />
+                                            <input
+                                                type="text"
+                                                placeholder="İsim veya e-posta ile ara..."
+                                                value={userSearchQuery}
+                                                onChange={e => setUserSearchQuery(e.target.value)}
+                                                className="w-full pl-12 pr-4 py-3 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-teal-500"
+                                            />
                                         </div>
-                                    ))}
+                                        <select
+                                            value={userFilterPremium}
+                                            onChange={e => setUserFilterPremium(e.target.value as any)}
+                                            className="px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl outline-none focus:border-teal-500"
+                                        >
+                                            <option value="all">Tümü</option>
+                                            <option value="premium">Premium</option>
+                                            <option value="free">Ücretsiz</option>
+                                        </select>
+                                        <button
+                                            onClick={async () => {
+                                                setSearchingUsers(true);
+                                                const result = await searchAdminUsers({
+                                                    query: userSearchQuery || undefined,
+                                                    isPremium: userFilterPremium === 'all' ? undefined : userFilterPremium === 'premium',
+                                                    limit: 100
+                                                });
+                                                setUsers(result);
+                                                setSearchingUsers(false);
+                                            }}
+                                            disabled={searchingUsers}
+                                            className="px-6 py-3 bg-teal-600 text-white rounded-xl font-bold hover:bg-teal-700 disabled:opacity-50 flex items-center gap-2"
+                                        >
+                                            {searchingUsers ? 'Aranıyor...' : <><Search size={18} /> Ara</>}
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                setUserSearchQuery('');
+                                                setUserFilterPremium('all');
+                                                setSearchingUsers(true);
+                                                const result = await getAllUsers();
+                                                setUsers(result);
+                                                setSearchingUsers(false);
+                                            }}
+                                            className="px-4 py-3 bg-stone-100 text-stone-600 rounded-xl font-medium hover:bg-stone-200"
+                                        >
+                                            Sıfırla
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* User List */}
+                                <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
+                                    <div className="p-6 border-b border-stone-100">
+                                        <h3 className="font-bold text-stone-800 text-lg flex items-center gap-2">
+                                            <Users size={20} className="text-teal-600" />
+                                            Kayıtlı Kullanıcılar ({users.length})
+                                        </h3>
+                                    </div>
+                                    <div className="divide-y divide-stone-100 max-h-[600px] overflow-y-auto">
+                                        {users.length === 0 ? (
+                                            <div className="p-8 text-center text-stone-400">
+                                                {searchingUsers ? 'Aranıyor...' : 'Kullanıcı bulunamadı.'}
+                                            </div>
+                                        ) : (
+                                            users.map(user => (
+                                                <div key={user.id} className="p-4 flex items-center justify-between hover:bg-stone-50 transition-colors">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-12 h-12 bg-linear-to-br from-teal-400 to-teal-600 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                                                            {user.name?.charAt(0) || 'U'}
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <h4 className="font-bold text-stone-800">{user.name}</h4>
+                                                                {user.isPremium && (
+                                                                    <span className="bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0.5 rounded-full font-bold border border-amber-200">
+                                                                        PRO
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <p className="text-sm text-stone-400">{user.email}</p>
+                                                            <div className="flex gap-2 mt-1.5">
+                                                                <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100">
+                                                                    {user.city || 'Şehir Yok'}
+                                                                </span>
+                                                                <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 border border-purple-100 font-medium">
+                                                                    {user.stats?.totalZikir || 0} Zikir
+                                                                </span>
+                                                                <span className="text-xs px-2 py-0.5 rounded-full bg-teal-50 text-teal-600 border border-teal-100 font-medium">
+                                                                    {user.stats?.totalPrayers || 0} Dua
+                                                                </span>
+                                                                <span className="text-xs px-2 py-0.5 rounded-full bg-stone-100 text-stone-500">
+                                                                    {new Date(user.joinDate).toLocaleDateString('tr-TR')}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => handleBanUser(user.id)}
+                                                        className="p-2 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                                        title="Engelle"
+                                                    >
+                                                        <Ban size={18} />
+                                                    </button>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         )}
@@ -322,6 +449,53 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ prayers, onBack }) => {
                                     </div>
                                 )}
 
+                                {/* Edit Package Modal */}
+                                {editingPackage && (
+                                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                                        <div className="bg-white rounded-2xl w-full max-w-md p-6">
+                                            <h3 className="font-bold text-stone-800 mb-4">Paketi Düzenle</h3>
+                                            <div className="space-y-4">
+                                                <input
+                                                    type="text"
+                                                    value={editPkgTitle}
+                                                    onChange={e => setEditPkgTitle(e.target.value)}
+                                                    placeholder="Paket Adı"
+                                                    className="w-full px-4 py-3 border border-stone-200 rounded-xl outline-none focus:border-teal-500"
+                                                />
+                                                <textarea
+                                                    value={editPkgDesc}
+                                                    onChange={e => setEditPkgDesc(e.target.value)}
+                                                    placeholder="Açıklama"
+                                                    className="w-full px-4 py-3 border border-stone-200 rounded-xl h-24 outline-none focus:border-teal-500"
+                                                />
+                                                <label className="flex items-center gap-3 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={editPkgPremium}
+                                                        onChange={e => setEditPkgPremium(e.target.checked)}
+                                                        className="w-5 h-5"
+                                                    />
+                                                    <span className="text-stone-600">Premium Üyelere Özel</span>
+                                                </label>
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={handleUpdatePackage}
+                                                        className="flex-1 py-3 bg-teal-600 text-white rounded-xl font-bold hover:bg-teal-700"
+                                                    >
+                                                        Kaydet
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setEditingPackage(null)}
+                                                        className="px-6 py-3 bg-stone-100 text-stone-600 rounded-xl font-bold hover:bg-stone-200"
+                                                    >
+                                                        İptal
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="grid grid-cols-2 gap-4">
                                     {packages.length === 0 && (
                                         <div className="col-span-2 text-center py-12 text-stone-400">
@@ -341,9 +515,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ prayers, onBack }) => {
                                                     <p className="text-stone-500 text-sm mt-1">{pkg.description}</p>
                                                     <p className="text-xs text-stone-400 mt-3">{pkg.itemCount || 0} Dua</p>
                                                 </div>
-                                                <button className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors">
-                                                    <Trash2 size={18} />
-                                                </button>
+                                                <div className="flex gap-1">
+                                                    <button
+                                                        onClick={() => startEditPackage(pkg)}
+                                                        className="text-blue-500 hover:text-blue-600 p-2 hover:bg-blue-50 rounded-lg transition-colors"
+                                                    >
+                                                        <Edit2 size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeletePackage(pkg.id!)}
+                                                        className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     ))}
@@ -491,23 +676,69 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ prayers, onBack }) => {
 
                                 <div className="space-y-4">
                                     <h3 className="font-bold text-stone-800 text-lg px-2">Mevcut Sözler ({quotes.length})</h3>
-                                    <div className="space-y-3">
+                                    <div className="space-y-3 max-h-[500px] overflow-y-auto">
                                         {quotes.map(q => (
                                             <div key={q.id || Math.random()} className="bg-white p-4 rounded-xl border border-stone-200 shadow-sm relative group">
-                                                <p className="font-serif italic text-stone-800 mb-2">"{q.text}"</p>
+                                                <p className="font-serif italic text-stone-800 mb-2 pr-16">"{q.text}"</p>
                                                 <p className="text-xs text-stone-500 font-bold text-right">- {q.source}</p>
                                                 {q.id && (
-                                                    <button
-                                                        onClick={() => handleDeleteQuote(q.id!)}
-                                                        className="absolute top-2 right-2 p-1.5 text-stone-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
-                                                    >
-                                                        <Trash2 size={14} />
-                                                    </button>
+                                                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                                        <button
+                                                            onClick={() => startEditQuote(q)}
+                                                            className="p-1.5 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                                                        >
+                                                            <Edit2 size={14} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeleteQuote(q.id!)}
+                                                            className="p-1.5 text-stone-300 hover:text-red-500 hover:bg-red-50 rounded-lg"
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    </div>
                                                 )}
                                             </div>
                                         ))}
                                     </div>
                                 </div>
+
+                                {/* Edit Quote Modal */}
+                                {editingQuote && (
+                                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                                        <div className="bg-white rounded-2xl w-full max-w-md p-6">
+                                            <h3 className="font-bold text-stone-800 mb-4">Sözü Düzenle</h3>
+                                            <div className="space-y-4">
+                                                <textarea
+                                                    value={editQuoteText}
+                                                    onChange={e => setEditQuoteText(e.target.value)}
+                                                    placeholder="Söz metni..."
+                                                    className="w-full px-4 py-3 border border-stone-200 rounded-xl h-32 outline-none focus:border-teal-500"
+                                                />
+                                                <input
+                                                    type="text"
+                                                    value={editQuoteSource}
+                                                    onChange={e => setEditQuoteSource(e.target.value)}
+                                                    placeholder="Kaynak / Yazar"
+                                                    className="w-full px-4 py-3 border border-stone-200 rounded-xl outline-none focus:border-teal-500"
+                                                />
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={handleUpdateQuote}
+                                                        className="flex-1 py-3 bg-teal-600 text-white rounded-xl font-bold hover:bg-teal-700"
+                                                    >
+                                                        Kaydet
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setEditingQuote(null)}
+                                                        className="px-6 py-3 bg-stone-100 text-stone-600 rounded-xl font-bold hover:bg-stone-200"
+                                                    >
+                                                        İptal
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 

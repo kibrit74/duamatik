@@ -1087,6 +1087,87 @@ export async function getAllUsers(): Promise<User[]> {
   }
 }
 
+// Admin: Search and Filter Users
+export interface AdminUserFilters {
+  query?: string;       // Search by name or email
+  isPremium?: boolean;  // Filter by premium status
+  city?: string;        // Filter by city
+  limit?: number;       // Max results
+}
+
+export async function searchAdminUsers(filters: AdminUserFilters): Promise<User[]> {
+  try {
+    const { query, isPremium, city, limit = 50 } = filters;
+
+    let queryBuilder = supabase
+      .from('profiles')
+      .select('*')
+      .order('join_date', { ascending: false })
+      .limit(limit);
+
+    // Apply filters
+    if (query && query.length >= 2) {
+      queryBuilder = queryBuilder.or(`name.ilike.%${query}%,email.ilike.%${query}%`);
+    }
+
+    if (isPremium !== undefined) {
+      queryBuilder = queryBuilder.eq('is_premium', isPremium);
+    }
+
+    if (city && city.trim() !== '') {
+      queryBuilder = queryBuilder.ilike('city', `%${city}%`);
+    }
+
+    const { data: profiles, error } = await queryBuilder;
+
+    if (error || !profiles) {
+      logger.error('Error searching users:', error);
+      return [];
+    }
+
+    // Get stats for returned users
+    const userIds = profiles.map(p => p.id);
+
+    const [prayersResult, customPrayersResult] = await Promise.all([
+      supabase.from('user_prayers').select('user_id, current_count').in('user_id', userIds),
+      supabase.from('custom_prayers').select('user_id, current_count').in('user_id', userIds)
+    ]);
+
+    const statsMap = new Map<string, { totalZikir: number; totalPrayers: number }>();
+
+    prayersResult.data?.forEach((up: any) => {
+      const current = statsMap.get(up.user_id) || { totalZikir: 0, totalPrayers: 0 };
+      current.totalZikir += (up.current_count || 0);
+      current.totalPrayers += 1;
+      statsMap.set(up.user_id, current);
+    });
+
+    customPrayersResult.data?.forEach((cp: any) => {
+      const current = statsMap.get(cp.user_id) || { totalZikir: 0, totalPrayers: 0 };
+      current.totalZikir += (cp.current_count || 0);
+      current.totalPrayers += 1;
+      statsMap.set(cp.user_id, current);
+    });
+
+    return profiles.map(p => {
+      const stats = statsMap.get(p.id) || { totalZikir: 0, totalPrayers: 0 };
+      return {
+        id: p.id,
+        email: p.email || '',
+        name: p.name || 'Anonim',
+        role: p.role || 'user',
+        city: p.city,
+        joinDate: p.join_date || p.created_at || new Date().toISOString(),
+        isPremium: p.is_premium || false,
+        stats: stats
+      };
+    });
+  } catch (e) {
+    logger.error('searchAdminUsers failed:', e);
+    return [];
+  }
+}
+
 // Admin: Ban User (Status update simulation)
 export async function updateUserStatus(userId: string, status: string): Promise<boolean> {
   // Assuming we have a 'status' column or using 'role' to ban
@@ -1159,6 +1240,39 @@ export async function addPrayerToPackage(packageId: string, prayerId: string): P
 
   if (error) {
     logger.error('Error adding prayer to package:', error);
+    return false;
+  }
+  return true;
+}
+
+// Packages: Update
+export async function updatePackage(id: string, updates: { title?: string; description?: string; isPremium?: boolean }): Promise<boolean> {
+  const { error } = await supabase
+    .from('prayer_packages')
+    .update({
+      title: updates.title,
+      description: updates.description,
+      is_premium: updates.isPremium,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id);
+
+  if (error) {
+    logger.error('Error updating package:', error);
+    return false;
+  }
+  return true;
+}
+
+// Packages: Delete
+export async function deletePackage(id: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('prayer_packages')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    logger.error('Error deleting package:', error);
     return false;
   }
   return true;
@@ -1262,6 +1376,23 @@ export async function addQuote(text: string, source: string): Promise<boolean> {
 export async function deleteQuote(id: string): Promise<boolean> {
   const { error } = await supabase.from('daily_quotes').delete().eq('id', id);
   if (error) return false;
+  return true;
+}
+
+// Quotes: Update
+export async function updateQuote(id: string, updates: { text?: string; source?: string }): Promise<boolean> {
+  const { error } = await supabase
+    .from('daily_quotes')
+    .update({
+      text: updates.text,
+      source: updates.source
+    })
+    .eq('id', id);
+
+  if (error) {
+    logger.error('Error updating quote:', error);
+    return false;
+  }
   return true;
 }
 
