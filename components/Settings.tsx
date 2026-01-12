@@ -18,7 +18,7 @@ interface SettingsProps {
 }
 
 const Settings: React.FC<SettingsProps> = ({ notificationsEnabled, setNotificationsEnabled, user, onLogout, prayers = [], onOpenPrayer }) => {
-  const [permissionStatus, setPermissionStatus] = useState<'granted' | 'denied' | 'prompt'>('prompt');
+  const [permissionStatus, setPermissionStatus] = useState<'granted' | 'denied' | 'prompt' | 'prompt-with-rationale'>('prompt');
   const isNative = Capacitor.isNativePlatform();
 
   // Son açılan dualar (currentCount > 0 ve lastUpdated'e göre sıralı)

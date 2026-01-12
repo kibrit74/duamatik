@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { User, Prayer, Quote, PrayerPackage, AdminNotification, SpiritualPlan } from '../../types';
+import { User, Prayer, Quote, PrayerPackage, AdminNotification, SpiritualPlan, FriendProfile } from '../../types';
 import { logger } from '../../utils/logger';
 import { supabase } from './client';
 
@@ -639,13 +639,7 @@ export async function getUserStats(userId: string): Promise<{ totalZikir: number
 // FRIENDSHIP SYSTEM
 // ==================
 
-export interface FriendProfile {
-  id: string;
-  name: string;
-  city: string | null;
-  isOnline: boolean;
-  lastActive: string | null;
-}
+
 
 export interface FriendRequest {
   id: string;

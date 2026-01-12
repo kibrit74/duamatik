@@ -216,12 +216,12 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ isOpen, onClose
                                             <div className="mb-3">
                                                 <div className="flex justify-between text-xs text-stone-500 mb-1">
                                                     <span>İlerleme</span>
-                                                    <span>{campaign.current_count}/{campaign.target_count} Cüz</span>
+                                                    <span>{campaign.current_count}/{campaign.goal} Cüz</span>
                                                 </div>
                                                 <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
                                                     <div
                                                         className="h-full bg-linear-to-r from-teal-400 to-emerald-500 rounded-full transition-all"
-                                                        style={{ width: `${Math.min(100, (campaign.current_count / campaign.target_count) * 100)}%` }}
+                                                        style={{ width: `${Math.min(100, ((campaign.current_count || 0) / campaign.goal) * 100)}%` }}
                                                     />
                                                 </div>
                                             </div>

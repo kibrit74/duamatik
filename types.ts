@@ -77,8 +77,10 @@ export interface Friend {
 export interface FriendProfile {
   id: string;
   name: string;
-  city: string;
-  isCustom: boolean;
+  city: string | null;
+  isCustom?: boolean;
+  isOnline?: boolean;
+  lastActive?: string | null;
 }
 
 export interface FriendRequest {
