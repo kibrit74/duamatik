@@ -74,6 +74,11 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
   const [count, setCount] = useState(prayer.currentCount);
   const [isCompleted, setIsCompleted] = useState(false);
 
+  // KRITIK: prayer prop değiştiğinde count'u senkronize et
+  useEffect(() => {
+    setCount(prayer.currentCount);
+  }, [prayer.id, prayer.currentCount]);
+
   const sessionStartCountRef = useRef(prayer.currentCount);
 
   const [showSettings, setShowSettings] = useState(false);
@@ -484,42 +489,46 @@ const Counter: React.FC<CounterProps> = ({ prayer, onUpdate, onBack, user, onOpe
 
       {isPocketMode && (
         <div
-          className="absolute inset-0 z-100 bg-black cursor-pointer flex flex-col justify-between p-6 touch-manipulation pb-safe shadow-[inset_0_0_100px_rgba(45,212,191,0.6)] border-4 border-teal-400/50"
+          className="fixed inset-0 z-9999 bg-black cursor-pointer flex flex-col touch-manipulation"
           onClick={() => handleIncrement(true)}
         >
-          {/* ... Pocket Mode Content ... */}
-          <div className="flex justify-between items-start text-stone-600 select-none">
+          {/* Header */}
+          <div className="flex justify-between items-start p-6 select-none shrink-0">
             <div className="flex flex-col">
               <div className="flex items-center gap-2 mb-1">
-                <Smartphone size={20} className="text-teal-600" />
-                <span className="text-xs font-bold uppercase tracking-widest text-teal-600">Cep Modu</span>
+                <Smartphone size={20} className="text-teal-500" />
+                <span className="text-xs font-bold uppercase tracking-widest text-teal-500">Cep Modu</span>
               </div>
               <span className="text-[10px] text-stone-500">Ekranın ortasına dokunarak sayın</span>
             </div>
             <button
               onClick={(e) => { e.stopPropagation(); setIsPocketMode(false); }}
-              className="p-3 bg-stone-900 rounded-full border border-stone-800 text-stone-400 hover:text-white hover:border-stone-600 transition-all active:scale-95"
+              className="p-3 bg-stone-900 rounded-full border border-stone-700 text-stone-400 hover:text-white hover:border-stone-500 transition-all active:scale-95"
             >
               <X size={24} />
             </button>
           </div>
 
-          <div className="fixed inset-0 z-100 flex items-center justify-center p-6 animate-in fade-in duration-300">
-            <div className="text-[120px] font-mono font-bold text-stone-200 leading-none tracking-tighter drop-shadow-lg select-none pointer-events-none">
+          {/* Centered Content */}
+          <div className="flex-1 flex flex-col items-center justify-center px-6 pb-safe">
+            {/* Count Display */}
+            <div className="text-[100px] sm:text-[120px] font-mono font-bold text-white leading-none tracking-tighter drop-shadow-lg select-none">
               {count}
             </div>
+
+            {/* Progress Bar */}
             {prayer.targetCount > 0 && (
-              <div className="mt-4 w-48 h-1 bg-stone-800 rounded-full overflow-hidden shrink-0 pointer-events-none">
+              <div className="mt-6 w-48 h-1.5 bg-stone-800 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-teal-600 transition-all duration-300"
+                  className="h-full bg-teal-500 transition-all duration-300"
                   style={{ width: `${Math.min((count / prayer.targetCount) * 100, 100)}%` }}
-                ></div>
+                />
               </div>
             )}
 
-            {/* Pocket Mode Prayer Text */}
-            <div className="mt-8 w-full max-w-sm text-center overflow-y-auto no-scrollbar mask-gradient z-10 px-4">
-              <p className="text-xl font-serif text-stone-400 leading-relaxed pointer-events-none">
+            {/* Prayer Text */}
+            <div className="mt-8 w-full max-w-md text-center px-4">
+              <p className="text-lg font-serif text-stone-400 leading-relaxed line-clamp-4 pointer-events-none">
                 {prayer.turkish}
               </p>
             </div>

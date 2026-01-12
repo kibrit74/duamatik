@@ -15,6 +15,8 @@ const ShareModal: React.FC<ShareModalProps> = ({ prayer, onClose }) => {
   const [loading, setLoading] = useState(true);
   const [shareFile, setShareFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Base64 dataUrl'i tutmak için state
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -24,17 +26,18 @@ const ShareModal: React.FC<ShareModalProps> = ({ prayer, onClose }) => {
       if (!cardRef.current) return;
 
       try {
-        const dataUrl = await toPng(cardRef.current, {
+        const url = await toPng(cardRef.current, {
           cacheBust: true,
           pixelRatio: 2,
           skipAutoScale: true
         });
 
-        const res = await fetch(dataUrl);
+        const res = await fetch(url);
         const blob = await res.blob();
         const file = new File([blob], 'dua-kart.png', { type: 'image/png' });
 
         if (isMounted) {
+          setDataUrl(url);
           setShareFile(file);
           setLoading(false);
         }
@@ -55,38 +58,60 @@ const ShareModal: React.FC<ShareModalProps> = ({ prayer, onClose }) => {
   const handleShare = async () => {
     if (!shareFile) return;
 
+    const shareText = `"${prayer.title}" duasını seninle paylaşıyorum.\n\n${prayer.turkish}\n\n📿 Dijital Tesbih & Dua Uygulaması`;
+
+    // Try Web Share API with files first (works on newer Android/iOS)
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [shareFile] })) {
+      try {
+        await navigator.share({
+          title: prayer.title,
+          text: shareText,
+          files: [shareFile]
+        });
+        return;
+      } catch (e: any) {
+        if (e.name === 'AbortError') return;
+        console.log('Web Share with files failed, trying text-only');
+      }
+    }
+
+    // Fallback: Share text only via Capacitor
     try {
-      // Convert blob to base64
-      const reader = new FileReader();
-      reader.readAsDataURL(shareFile);
+      await Share.share({
+        title: prayer.title,
+        text: shareText + '\n\n💡 Resmi indirmek için uygulamadaki "Resmi İndir" butonunu kullanın.',
+        dialogTitle: 'Duayı Paylaş'
+      });
+    } catch (shareError: any) {
+      if (shareError?.message !== 'Share canceled') {
+        copyText();
+        alert('Metin kopyalandı! Galeriden resmi paylaşabilirsiniz.');
+      }
+    }
+  };
 
-      reader.onloadend = async () => {
-        const base64data = reader.result as string;
+  const handleDownload = () => {
+    if (!dataUrl) return;
 
-        try {
-          await Share.share({
-            title: prayer.title,
-            text: `"${prayer.title}" duasını seninle paylaşıyorum.`,
-            url: base64data,
-            dialogTitle: 'Duayı Paylaş'
-          });
-        } catch (shareError: any) {
-          // If sharing fails, download instead
-          if (shareError?.message !== 'Share canceled') {
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(shareFile);
-            a.download = `${prayer.title.replace(/\s+/g, '-').toLowerCase()}.png`;
-            a.click();
-          }
-        }
-      };
-    } catch (err) {
-      console.error('Sharing failed', err);
-      alert('Paylaşım başarısız oldu. Resim cihazınıza kaydedilecek.');
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(shareFile);
-      a.download = `${prayer.title.replace(/\s+/g, '-').toLowerCase()}.png`;
-      a.click();
+    // Yeni pencerede aç - kullanıcı uzun basarak indirebilir
+    const newWindow = window.open();
+    if (newWindow) {
+      newWindow.document.write(`
+        <html>
+          <head><title>${prayer.title} - Dua Kartı</title></head>
+          <body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#1a1a1a;">
+            <div style="text-align:center;color:white;font-family:sans-serif;">
+              <p style="margin-bottom:16px;">📱 Resmi indirmek için resme uzun basın veya sağ tıklayın</p>
+              <img src="${dataUrl}" style="max-width:90vw;max-height:80vh;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.3);" />
+            </div>
+          </body>
+        </html>
+      `);
+      newWindow.document.close();
+    } else {
+      // Popup engellenmiş - alternatif olarak kopyala
+      copyText();
+      alert('Resim yeni sekmede açılamadı. Metin kopyalandı.');
     }
   };
 
@@ -95,9 +120,8 @@ const ShareModal: React.FC<ShareModalProps> = ({ prayer, onClose }) => {
     if (prayer.meaning) {
       textToCopy += `\n\nAnlamı: ${prayer.meaning}`;
     }
-    textToCopy += `\n\nPaylaşıldı: Dijital Tesbih`;
+    textToCopy += `\n\n📿 Dijital Tesbih & Dua`;
     navigator.clipboard.writeText(textToCopy);
-    alert('Metin kopyalandı!');
   };
 
   return (
@@ -165,21 +189,29 @@ const ShareModal: React.FC<ShareModalProps> = ({ prayer, onClose }) => {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mt-2 pb-safe">
+          <div className="grid grid-cols-3 gap-2 mt-2 pb-safe">
             <button
-              onClick={copyText}
-              className="py-3 bg-white text-stone-700 rounded-xl font-bold text-sm hover:bg-stone-50 flex items-center justify-center gap-2 shadow-lg"
+              onClick={() => { copyText(); alert('Metin kopyalandı!'); }}
+              className="py-3 bg-white text-stone-700 rounded-xl font-bold text-xs hover:bg-stone-50 flex flex-col items-center justify-center gap-1 shadow-lg"
             >
               <Copy size={18} />
-              Metni Kopyala
+              Kopyala
+            </button>
+            <button
+              onClick={handleDownload}
+              disabled={loading || !!error}
+              className="py-3 bg-teal-600 text-white rounded-xl font-bold text-xs hover:bg-teal-700 flex flex-col items-center justify-center gap-1 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Download size={18} />
+              {loading ? '...' : 'Resmi İndir'}
             </button>
             <button
               onClick={handleShare}
               disabled={loading || !!error}
-              className="py-3 bg-linear-to-r from-amber-500 to-amber-600 text-white rounded-xl font-bold text-sm hover:from-amber-600 hover:to-amber-700 flex items-center justify-center gap-2 shadow-lg shadow-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="py-3 bg-linear-to-r from-amber-500 to-amber-600 text-white rounded-xl font-bold text-xs hover:from-amber-600 hover:to-amber-700 flex flex-col items-center justify-center gap-1 shadow-lg shadow-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Share2 size={18} />
-              {loading ? 'Hazırlanıyor...' : 'Resimli Paylaş'}
+              {loading ? '...' : 'Paylaş'}
             </button>
           </div>
         </div>

@@ -27,7 +27,7 @@ const ReminderModal: React.FC<ReminderModalProps> = ({ prayer, onSave, onClose }
 
   const handleSave = async () => {
     try {
-      // Request permission using Capacitor
+      // 1. Request Permissions
       const permStatus = await LocalNotifications.checkPermissions();
       if (permStatus.display !== 'granted') {
         const request = await LocalNotifications.requestPermissions();
@@ -37,6 +37,17 @@ const ReminderModal: React.FC<ReminderModalProps> = ({ prayer, onSave, onClose }
         }
       }
 
+      // 2. Create Channel (Android 8+ Required)
+      await LocalNotifications.createChannel({
+        id: 'prayer-reminders',
+        name: 'Dua Hatırlatıcıları',
+        description: 'Zikir ve dua zamanı hatırlatmaları',
+        sound: 'default',
+        importance: 5,
+        visibility: 1,
+        vibration: true,
+      });
+
       const newReminder: Reminder = {
         active: true,
         type,
@@ -45,11 +56,74 @@ const ReminderModal: React.FC<ReminderModalProps> = ({ prayer, onSave, onClose }
         date: type === 'onetime' ? date : undefined
       };
 
+      // 3. Calculate Date
+      const [hours, minutes] = time.split(':').map(Number);
+      let scheduleDate: Date;
+      const now = new Date();
+
+      if (type === 'onetime') {
+        scheduleDate = new Date(date);
+        scheduleDate.setHours(hours, minutes, 0, 0);
+
+        if (scheduleDate <= now) {
+          alert('Geçmiş bir zaman için hatırlatıcı kuramazsınız.');
+          return;
+        }
+      } else {
+        // Weekly
+        scheduleDate = new Date();
+        scheduleDate.setHours(hours, minutes, 0, 0);
+        const currentDay = scheduleDate.getDay(); // 0-6
+
+        let daysUntil = day - currentDay;
+
+        // If same day but time passed, or previous day -> add 7 days
+        if (daysUntil < 0 || (daysUntil === 0 && scheduleDate <= now)) {
+          daysUntil += 7;
+        }
+
+        if (daysUntil > 0) {
+          scheduleDate.setDate(scheduleDate.getDate() + daysUntil);
+        }
+      }
+
+      // 4. Cancel existing
+      try {
+        const prayerHash = Math.abs(prayer.id.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a; }, 0));
+        await LocalNotifications.cancel({ notifications: [{ id: prayerHash }] });
+      } catch (e) { /* ignore */ }
+
+      // 5. Schedule
+      const notificationId = Math.abs(prayer.id.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a; }, 0));
+
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            id: notificationId,
+            title: '📿 Zikir Vakti',
+            body: `${prayer.title} duasını okuma zamanı geldi!`,
+            schedule: {
+              at: scheduleDate,
+              allowWhileIdle: true,
+              repeats: type === 'weekly',
+              every: type === 'weekly' ? 'week' : undefined
+            },
+            sound: 'default',
+            channelId: 'prayer-reminders',
+            actionTypeId: '',
+            extra: { prayerId: prayer.id }
+          }
+        ]
+      });
+
+      console.log('[DEBUG] Scheduled:', { id: notificationId, date: scheduleDate, channel: 'prayer-reminders' });
+
       onSave({ ...prayer, reminder: newReminder });
+      alert(`Hatırlatıcı ayarlandı!\n📅 ${scheduleDate.toLocaleDateString('tr-TR')}\n⏰ ${scheduleDate.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`);
       onClose();
     } catch (error) {
-      console.error('Hatırlatıcı kaydedilemedi:', error);
-      alert('Hatırlatıcı kaydedilemedi. Lütfen tekrar deneyin.');
+      console.error('Hatırlatıcı hatası:', error);
+      alert('Hata: ' + (error as any).message);
     }
   };
 

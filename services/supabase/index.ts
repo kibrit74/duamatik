@@ -77,14 +77,21 @@ export interface DbPrayer {
 export async function getCatalogPrayers(): Promise<DbPrayer[]> {
   try {
     const timeoutPromise = new Promise<DbPrayer[]>((resolve) =>
-      setTimeout(() => resolve([]), 5000)
+      setTimeout(() => resolve([]), 10000)
     );
 
     const queryPromise = (async () => {
-      const { data, error } = await supabase
+      console.log('[DEBUG] getCatalogPrayers: Fetching from Supabase...');
+      const { data, error, count } = await supabase
         .from('prayers')
-        .select('*')
+        .select('*', { count: 'exact' })
         .order('title');
+
+      console.log('[DEBUG] getCatalogPrayers result:', {
+        dataLength: data?.length,
+        count,
+        error: error?.message
+      });
 
       if (error) {
         logger.error('Error fetching catalog prayers:', error);
@@ -95,9 +102,90 @@ export async function getCatalogPrayers(): Promise<DbPrayer[]> {
 
     return await Promise.race([queryPromise, timeoutPromise]);
   } catch (e) {
+    console.error('[DEBUG] getCatalogPrayers exception:', e);
     logger.warn('getCatalogPrayers failed:', e);
     return [];
   }
+}
+
+// Admin: Add new catalog prayer
+export async function addCatalogPrayer(prayer: {
+  title: string;
+  arabic?: string;
+  turkish: string;
+  meaning?: string;
+  target_count?: number;
+  tags?: string[];
+}): Promise<DbPrayer | null> {
+  const { data, error } = await supabase
+    .from('prayers')
+    .insert({
+      title: prayer.title,
+      arabic: prayer.arabic || null,
+      turkish: prayer.turkish,
+      meaning: prayer.meaning || null,
+      target_count: prayer.target_count || 33,
+      tags: prayer.tags || [],
+    })
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Error adding catalog prayer:', error);
+    return null;
+  }
+  return data;
+}
+
+// Admin: Update catalog prayer
+export async function updateCatalogPrayer(id: string, updates: {
+  title?: string;
+  arabic?: string;
+  turkish?: string;
+  meaning?: string;
+  target_count?: number;
+  tags?: string[];
+}): Promise<boolean> {
+  // Build update object without undefined values
+  const updateData: Record<string, any> = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (updates.title !== undefined) updateData.title = updates.title;
+  if (updates.arabic !== undefined) updateData.arabic = updates.arabic;
+  if (updates.turkish !== undefined) updateData.turkish = updates.turkish;
+  if (updates.meaning !== undefined) updateData.meaning = updates.meaning;
+  if (updates.target_count !== undefined) updateData.target_count = updates.target_count;
+  if (updates.tags !== undefined) updateData.tags = updates.tags;
+
+  console.log('[DEBUG] updateCatalogPrayer:', { id, updateData });
+
+  const { error } = await supabase
+    .from('prayers')
+    .update(updateData)
+    .eq('id', id);
+
+  if (error) {
+    logger.error('Error updating catalog prayer:', error);
+    console.error('[DEBUG] Supabase update error:', error);
+    return false;
+  }
+  console.log('[DEBUG] Prayer updated successfully');
+  return true;
+}
+
+// Admin: Delete catalog prayer
+export async function deleteCatalogPrayer(id: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('prayers')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    logger.error('Error deleting catalog prayer:', error);
+    return false;
+  }
+  return true;
 }
 
 export async function seedCatalogPrayers(prayers: Array<{
@@ -766,6 +854,32 @@ export async function rejectFriendRequest(requestId: string): Promise<boolean> {
   }
 }
 
+// Send nudge to friend (dürtme)
+export async function sendNudge(fromUserId: string, toUserId: string, fromUserName: string): Promise<boolean> {
+  try {
+    // Insert a nudge notification
+    const { error } = await supabase
+      .from('notifications')
+      .insert({
+        user_id: toUserId,
+        type: 'nudge',
+        title: '📿 Dürtme!',
+        message: `${fromUserName} seni dürtüyor! Zikirlerini yapmayı unutma!`,
+        read: false,
+        created_at: new Date().toISOString()
+      });
+
+    if (error) {
+      logger.error('Error sending nudge:', error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    logger.error('Error sending nudge:', e);
+    return false;
+  }
+}
+
 // Remove friend
 export async function removeFriend(userId: string, friendId: string): Promise<boolean> {
   try {
@@ -814,15 +928,22 @@ export async function getInviteCode(userId: string): Promise<string | null> {
       .eq('user_id', userId)
       .gt('uses_remaining', 0)
       .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
 
-    if (error || !data) {
+    if (error) {
+      console.warn('[DEBUG] getInviteCode error:', error);
+      // Table may not exist or RLS issue - generate new code
+      return generateInviteCode(userId);
+    }
+
+    if (!data || data.length === 0) {
       // No existing code, generate new one
       return generateInviteCode(userId);
     }
-    return data.code;
+
+    return data[0].code;
   } catch (e) {
+    console.warn('[DEBUG] getInviteCode exception:', e);
     return generateInviteCode(userId);
   }
 }
@@ -1273,6 +1394,36 @@ export async function deletePackage(id: string): Promise<boolean> {
 
   if (error) {
     logger.error('Error deleting package:', error);
+    return false;
+  }
+  return true;
+}
+
+// Packages: Get prayers in a package
+export async function getPackagePrayers(packageId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('package_items')
+    .select('prayer_id')
+    .eq('package_id', packageId)
+    .order('display_order');
+
+  if (error) {
+    logger.error('Error getting package prayers:', error);
+    return [];
+  }
+  return data?.map(item => item.prayer_id) || [];
+}
+
+// Packages: Remove prayer from package
+export async function removePrayerFromPackage(packageId: string, prayerId: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('package_items')
+    .delete()
+    .eq('package_id', packageId)
+    .eq('prayer_id', prayerId);
+
+  if (error) {
+    logger.error('Error removing prayer from package:', error);
     return false;
   }
   return true;

@@ -9,6 +9,7 @@ import AdminModeration from './AdminModeration';
 import AdminCMS from './AdminCMS';
 import AdminFinance from './AdminFinance';
 import AdminTechnical from './AdminTechnical';
+import AdminPrayers from './AdminPrayers';
 
 interface AdminDashboardProps {
     prayers: Prayer[];
@@ -16,7 +17,7 @@ interface AdminDashboardProps {
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ prayers, onBack }) => {
-    const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'packages' | 'notifications' | 'quotes' | 'analytics' | 'banners' | 'hatim' | 'moderation' | 'cms' | 'finance' | 'technical'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'packages' | 'prayers' | 'notifications' | 'quotes' | 'analytics' | 'banners' | 'hatim' | 'moderation' | 'cms' | 'finance' | 'technical'>('overview');
     const [users, setUsers] = useState<User[]>([]);
     const [packages, setPackages] = useState<PrayerPackage[]>([]);
     const [notifications, setNotifications] = useState<AdminNotification[]>([]);
@@ -186,6 +187,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ prayers, onBack }) => {
         { id: 'analytics', label: 'Analitik', icon: BarChart3 },
         { id: 'users', label: 'Kullanıcılar', icon: Users },
         { id: 'packages', label: 'Dua Paketleri', icon: Package },
+        { id: 'prayers', label: 'Duaları Yönet', icon: BookOpen },
         { id: 'notifications', label: 'Bildirimler', icon: MessageSquare },
         { id: 'quotes', label: 'Günün Sözü', icon: QuoteIcon },
         { id: 'banners', label: 'Dinamik Banner', icon: Image },
@@ -744,6 +746,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ prayers, onBack }) => {
 
                         {/* NEW MODULES */}
                         {activeTab === 'analytics' && <AdminAnalytics />}
+                        {activeTab === 'prayers' && <AdminPrayers />}
                         {activeTab === 'banners' && <AdminBanners />}
                         {activeTab === 'hatim' && <AdminGlobalHatim />}
                         {activeTab === 'moderation' && <AdminModeration />}

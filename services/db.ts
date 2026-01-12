@@ -31,6 +31,18 @@ class DatabaseService {
     this.userId = userId;
   }
 
+  // Cache temizleme - sorunlu verileri kaldırmak için
+  clearCache() {
+    try {
+      localStorage.removeItem(LS_PRAYERS_CACHE);
+      localStorage.removeItem(LS_HATIM_CACHE);
+      localStorage.removeItem('HAS_SEEDED_PRAYERS');
+      console.log('[DB] Cache cleared');
+    } catch (e) {
+      console.error('[DB] Failed to clear cache:', e);
+    }
+  }
+
   getUserId(): string | null {
     return this.userId;
   }
@@ -104,11 +116,20 @@ class DatabaseService {
       // 3. Get user progress for catalog prayers
       const userProgress = await getUserPrayerProgress(this.userId);
 
-      // 4. Merge catalog prayers with user progress
+      // 4. Get cached prayers to preserve local changes if Supabase fails
+      const cachedPrayers = this.getCachedPrayers();
+      const cacheMap = new Map(cachedPrayers.map(p => [p.id, p]));
+
+      // 5. Merge catalog prayers with user progress (and cache fallback)
       const mergedPrayers: Prayer[] = [];
 
       for (const cp of catalogPrayers) {
         const progress = userProgress.find(up => up.prayer_id === cp.id);
+        const cached = cacheMap.get(cp.id);
+
+        // Öncelik: 1) Supabase progress 2) Cache 3) 0
+        const currentCount = progress?.current_count ?? cached?.currentCount ?? 0;
+        const history = progress?.history || cached?.history || [];
 
         mergedPrayers.push({
           id: cp.id,
@@ -117,12 +138,12 @@ class DatabaseService {
           turkish: cp.turkish,
           meaning: cp.meaning || undefined,
           targetCount: progress?.custom_target ?? cp.target_count,
-          currentCount: progress?.current_count ?? 0,
+          currentCount,
           tags: cp.tags || [],
-          lastUpdated: progress ? new Date(progress.last_updated).getTime() : Date.now(),
-          history: progress?.history || [],
-          reminder: progress?.reminder,
-          _audioUrl: progress?.audio_url || undefined,
+          lastUpdated: progress ? new Date(progress.last_updated).getTime() : (cached?.lastUpdated || Date.now()),
+          history,
+          reminder: progress?.reminder || cached?.reminder,
+          _audioUrl: progress?.audio_url || (cached as any)?._audioUrl || undefined,
           _isCatalog: true,
         } as Prayer & { _audioUrl?: string; _isCatalog?: boolean });
       }
@@ -159,13 +180,22 @@ class DatabaseService {
   }
 
   async savePrayer(prayer: Prayer): Promise<void> {
-    // Cache locally first
+    // Cache locally first - preserve internal flags
     const cached = this.getCachedPrayers();
     const idx = cached.findIndex(p => p.id === prayer.id);
+
+    // Preserve existing flags if they exist in cache
+    const existingPrayer = idx >= 0 ? cached[idx] : null;
+    const prayerToSave = {
+      ...prayer,
+      _isCatalog: (prayer as any)._isCatalog ?? (existingPrayer as any)?._isCatalog,
+      _isCustom: (prayer as any)._isCustom ?? (existingPrayer as any)?._isCustom,
+    };
+
     if (idx >= 0) {
-      cached[idx] = prayer;
+      cached[idx] = prayerToSave;
     } else {
-      cached.push(prayer);
+      cached.push(prayerToSave);
     }
     this.cachePrayers(cached);
 

@@ -33,11 +33,13 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ article, onBack }) => {
     };
 
     const handleShare = async () => {
+        // Tam içerikten ilk 500 karakter + özet
+        const contentPreview = article.content.substring(0, 500) + (article.content.length > 500 ? '...' : '');
+        const shareText = `${article.title}\n\n${contentPreview}\n\n📿 Dijital Tesbih & Dua Uygulaması`;
         try {
             await Share.share({
                 title: article.title,
-                text: article.excerpt || article.title,
-                url: window.location.href,
+                text: shareText,
                 dialogTitle: 'Makaleyi Paylaş'
             });
         } catch (error: any) {
@@ -45,8 +47,8 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ article, onBack }) => {
             if (error?.message !== 'Share canceled') {
                 // Fallback: copy to clipboard
                 try {
-                    await navigator.clipboard.writeText(`${article.title}\n\n${article.excerpt || ''}\n\n${window.location.href}`);
-                    alert('Makale bağlantısı kopyalandı!');
+                    await navigator.clipboard.writeText(shareText);
+                    alert('Makale metni kopyalandı!');
                 } catch (clipErr) {
                     console.error('Paylaşım başarısız:', error);
                 }

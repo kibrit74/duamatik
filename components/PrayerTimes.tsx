@@ -143,7 +143,7 @@ const PrayerTimes: React.FC = () => {
   if (!nextPrayer) return null;
 
   return (
-    <div className="mt-6 mb-1 w-full max-w-[300px] bg-gradient-to-br from-teal-50/80 to-white/60 backdrop-blur-md border border-emerald-100/60 rounded-2xl p-4 flex items-center justify-between relative overflow-hidden shadow-[0_2px_10px_-5px_rgba(0,0,0,0.05)] animate-in slide-in-from-bottom-2">
+    <div className="mt-6 mb-1 w-full max-w-[300px] bg-linear-to-br from-teal-50/80 to-white/60 backdrop-blur-md border border-emerald-100/60 rounded-2xl p-4 flex items-center justify-between relative overflow-hidden shadow-[0_2px_10px_-5px_rgba(0,0,0,0.05)] animate-in slide-in-from-bottom-2">
       {/* Decorative */}
       <div className="absolute top-0 right-0 w-16 h-16 bg-emerald-100/30 rounded-full -mr-8 -mt-8 blur-xl"></div>
 

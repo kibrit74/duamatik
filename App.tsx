@@ -20,7 +20,7 @@ const ArticlesPage = React.lazy(() => import('./components/ArticlesPage'));
 const ArticleDetail = React.lazy(() => import('./components/ArticleDetail'));
 import LoadingScreen from './components/LoadingScreen';
 import { dbService } from './services/db';
-import { getQuotes, getActiveBanners, getAppConfig, Banner, AppConfig, Article } from './services/supabase';
+import { getQuotes, getActiveBanners, getAppConfig, getUserStats, Banner, AppConfig, Article } from './services/supabase';
 import { runSeed, seedArticles } from './services/seedData';
 import { seedPrayers } from './services/seedPrayers';
 import { authService } from './services/authService';
@@ -58,6 +58,7 @@ const MobileApp: React.FC = () => {
   const [dailyQuote, setDailyQuote] = useState<Quote>(quotes[0]);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
   const [activeBanners, setActiveBanners] = useState<Banner[]>([]);
   const [appConfig, setAppConfig] = useState<AppConfig>({});
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
@@ -77,8 +78,7 @@ const MobileApp: React.FC = () => {
   const [libraryQuery, setLibraryQuery] = useState('');
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(10);
-
-  const totalDhikr = prayers.reduce((acc, curr) => acc + curr.currentCount, 0);
+  const [totalDhikr, setTotalDhikr] = useState(0);
   const reminderInterval = useRef<number | null>(null);
   const prayersRef = useRef<Prayer[]>([]);
   const notificationsEnabledRef = useRef(notificationsEnabled);
@@ -112,6 +112,32 @@ const MobileApp: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
+  // Check for unread notifications
+  useEffect(() => {
+    if (!user) return;
+
+    const checkNotifications = async () => {
+      try {
+        const [notifs, requests] = await Promise.all([
+          getUserNotifications(user),
+          getPendingRequests(user.id)
+        ]);
+
+        const lastRead = localStorage.getItem('last_read_notif_date');
+        const hasNewNotifs = notifs.some(n => !lastRead || new Date(n.created_at || '') > new Date(lastRead));
+        const hasNewRequests = requests.length > 0;
+
+        setHasUnreadNotifications(hasNewNotifs || hasNewRequests);
+      } catch (e) {
+        console.error('Error checking notifications:', e);
+      }
+    };
+
+    checkNotifications();
+    const interval = setInterval(checkNotifications, 30000); // Check every 30s
+    return () => clearInterval(interval);
+  }, [user]);
+
   useEffect(() => {
     prayersRef.current = prayers;
   }, [prayers]);
@@ -126,17 +152,38 @@ const MobileApp: React.FC = () => {
   }, [libraryQuery, activeTag]);
 
 
+  // Çift başlatmayı önlemek için ref
+  const isInitializingRef = useRef(false);
+  const hasInitializedRef = useRef(false);
 
   useEffect(() => {
     if (user) {
       // Set userId for Supabase sync
       dbService.setUserId(user.id);
-      initializeData();
+
+      // Çift başlatmayı önle
+      if (!hasInitializedRef.current && !isInitializingRef.current) {
+        isInitializingRef.current = true;
+
+        // ÖNEMLİ: Eski kirli cache'i temizle (bir kez)
+        const cacheCleared = sessionStorage.getItem('cache_cleared_v2');
+        if (!cacheCleared) {
+          dbService.clearCache();
+          sessionStorage.setItem('cache_cleared_v2', 'true');
+        }
+
+        initializeData().finally(() => {
+          isInitializingRef.current = false;
+          hasInitializedRef.current = true;
+        });
+      }
+
       loadDailyQuote();
       checkDeepLink();
       loadBannersAndConfig();
     } else {
       dbService.setUserId(null);
+      hasInitializedRef.current = false; // Logout olursa reset
     }
   }, [user]);
 
@@ -282,6 +329,15 @@ const MobileApp: React.FC = () => {
       }
 
       setPrayers(loadedPrayers.sort((a, b) => b.lastUpdated - a.lastUpdated));
+
+      // Supabase'den doğru toplam zikiri çek
+      if (user) {
+        const stats = await getUserStats(user.id);
+        if (stats) {
+          setTotalDhikr(stats.totalZikir);
+          console.log('[DEBUG] Supabase totalZikir:', stats.totalZikir);
+        }
+      }
     } catch (error) {
       console.error("Failed to load prayers", error);
     } finally {
@@ -291,6 +347,9 @@ const MobileApp: React.FC = () => {
 
   const loadPrayers = async () => {
     const loadedPrayers = await dbService.getAllPrayers();
+    // Debug: veriler yüklenirken kontrol
+    const totalCount = loadedPrayers.reduce((sum, p) => sum + p.currentCount, 0);
+    console.log('[DEBUG] loadPrayers:', loadedPrayers.length, 'prayers, total count:', totalCount);
     setPrayers(loadedPrayers.sort((a, b) => b.lastUpdated - a.lastUpdated));
   };
 
@@ -302,10 +361,27 @@ const MobileApp: React.FC = () => {
   };
 
   const handleUpdatePrayer = async (updatedPrayer: Prayer) => {
-    await dbService.savePrayer(updatedPrayer);
+    // Önceki değeri bul ve farkı hesapla
+    const oldPrayer = prayers.find(p => p.id === updatedPrayer.id);
+    const countDiff = updatedPrayer.currentCount - (oldPrayer?.currentCount || 0);
+
+    // Optimistic update: totalDhikr'ı hemen güncelle
+    if (countDiff !== 0) {
+      setTotalDhikr(prev => prev + countDiff);
+    }
+
+    // State'i güncelle
     setPrayers(prev => prev.map(p => p.id === updatedPrayer.id ? updatedPrayer : p));
+
     if (selectedPrayer && selectedPrayer.id === updatedPrayer.id) {
       setSelectedPrayer(updatedPrayer);
+    }
+
+    // Arkada planda Supabase'e kaydet
+    try {
+      await dbService.savePrayer(updatedPrayer);
+    } catch (error) {
+      console.error('[DEBUG] Failed to save prayer to DB:', error);
     }
   };
 
@@ -521,13 +597,24 @@ const MobileApp: React.FC = () => {
 
         <div className="bg-white/60 backdrop-blur-md pt-8 pb-8 px-4 rounded-b-4xl shadow-sm border-b border-emerald-100/50 z-10 flex flex-col items-center text-center relative">
 
-          <button
-            onClick={() => setShowNotifications(true)}
-            className="absolute top-6 right-6 p-2 bg-white/80 rounded-full border border-stone-200 text-stone-500 hover:text-orange-500 hover:border-orange-200 transition-colors shadow-sm"
-          >
-            <Bell size={20} />
-            {/* Optional: Add red dot if unread */}
-          </button>
+          <div className="absolute top-6 right-6">
+            <button
+              onClick={() => {
+                setShowNotifications(true);
+                setHasUnreadNotifications(false);
+                localStorage.setItem('last_read_notif_date', new Date().toISOString());
+              }}
+              className="relative p-2 bg-white/80 rounded-full border border-stone-200 text-stone-500 hover:text-orange-500 hover:border-orange-200 transition-colors shadow-sm group"
+            >
+              <Bell size={20} className="group-hover:animate-bounce" />
+              {/* Sadece okunmamış bildirim varsa nefes efekti yanar */}
+              {hasUnreadNotifications && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center animate-pulse shadow-lg shadow-red-400/50">
+                  <span className="absolute w-full h-full bg-red-400 rounded-full animate-ping opacity-75"></span>
+                </span>
+              )}
+            </button>
+          </div>
 
           <div className="mb-2 p-1 border-2 border-emerald-100 rounded-xl bg-white/80">
             <Logo size={80} />
@@ -711,7 +798,9 @@ const MobileApp: React.FC = () => {
                       <button onClick={(e) => handleShareClick(e, prayer)} className="p-2 text-stone-400 hover:text-teal-600 transition-colors active:scale-90"><Share2 size={16} /></button>
                       <button onClick={(e) => handleHistoryClick(e, prayer)} className="p-2 text-stone-400 hover:text-teal-600 transition-colors active:scale-90"><History size={16} /></button>
                       <button onClick={(e) => handleReminderClick(e, prayer)} className={`p-2 transition-colors active:scale-90 ${prayer.reminder?.active ? 'text-amber-500' : 'text-stone-400 hover:text-amber-500'}`}>{prayer.reminder?.active ? <CalendarClock size={16} /> : <Bell size={16} />}</button>
-                      <button onClick={(e) => handleDeletePrayer(e, prayer.id)} className="p-2 text-stone-400 hover:text-red-500 transition-colors active:scale-90"><Trash2 size={16} /></button>
+                      {(prayer as any)._isCustom && (
+                        <button onClick={(e) => handleDeletePrayer(e, prayer.id)} className="p-2 text-stone-400 hover:text-red-500 transition-colors active:scale-90"><Trash2 size={16} /></button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -726,10 +815,10 @@ const MobileApp: React.FC = () => {
     );
   };
 
-  const showNavigation = view === 'HOME' || view === 'SEARCH' || view === 'PROFILE' || view === 'SETTINGS' || view === 'SOCIAL' || view === 'ARTICLES';
+  const showNavigation = view === 'HOME' || view === 'SEARCH' || view === 'PROFILE' || view === 'SETTINGS' || view === 'SOCIAL' || view === 'ARTICLES' || view === 'COUNTER';
 
   return (
-    <div className="font-sans text-stone-900 bg-[#ecfdf5] w-full h-dvh max-w-md mx-auto relative shadow-2xl overflow-hidden flex flex-col select-none">
+    <div className="font-sans text-stone-900 bg-[#ecfdf5] w-full h-dvh relative overflow-hidden flex flex-col select-none">
       <React.Suspense fallback={<LoadingScreen message="Yükleniyor..." />}>
         <div className="flex-1 w-full relative overflow-hidden">
           {renderContent()}
